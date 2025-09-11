@@ -26,6 +26,8 @@ const configSchema = z.object({
 
 // Create MCP server function for Smithery
 function createMcpServer({ config }: { config: z.infer<typeof configSchema> }) {
+  console.log('Creating MCP server with config:', config);
+  
   const server = new McpServer(
     {
       name: "Invoice MCP Server",
@@ -37,6 +39,9 @@ function createMcpServer({ config }: { config: z.infer<typeof configSchema> }) {
       }
     }
   );
+
+  console.log('McpServer created, available methods:', Object.getOwnPropertyNames(server));
+  console.log('McpServer prototype methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(server)));
 
   // List tools
   server.setRequestHandler(ListToolsRequestSchema, async () => {
