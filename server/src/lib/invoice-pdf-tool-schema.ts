@@ -137,7 +137,7 @@ export const invoicePdfToolSchema = {
     outputPath: {
       type: "string",
       description:
-        "Custom output file path (defaults to Desktop/invoice-{invoiceNumber}.pdf)",
+        "Custom output file path (defaults to temp/invoice-{invoiceNumber}.pdf in container environment)",
     },
   },
   required: ["invoice"],

@@ -1,0 +1,59 @@
+runtime: "container"
+build:
+  dockerfile: "Dockerfile"
+  dockerBuildPath: "."
+startCommand:
+  type: "http"
+  configSchema:
+    type: "object"
+    properties:
+      logoUrl:
+        type: "string"
+        description: "Direct URL to logo image (JPG, PNG, WebP)"
+        title: "Logo URL"
+      businessName:
+        type: "string"
+        description: "Your business name"
+        title: "Business Name"
+      businessAddress:
+        type: "string"
+        description: "Your business address"
+        title: "Business Address"
+      businessEmail:
+        type: "string"
+        description: "Your business email"
+        title: "Business Email"
+      accountName:
+        type: "string"
+        description: "Bank account name"
+        title: "Account Name"
+      accountNumber:
+        type: "string"
+        description: "Bank account number"
+        title: "Account Number"
+      sortCode:
+        type: "string"
+        description: "Bank sort code"
+        title: "Sort Code"
+      defaultCurrency:
+        type: "string"
+        description: "Default currency (GBP, USD, CAD, EUR)"
+        title: "Default Currency"
+        default: "GBP"
+      defaultPaymentTerms:
+        type: "string"
+        description: "Default payment terms"
+        title: "Payment Terms"
+        default: "Payment due within 30 days of invoice date"
+    required: []
+  exampleConfig:
+    logoUrl: "https://example.com/logo.png"
+    businessName: "Your Business Ltd"
+    businessAddress: "123 Business Street, London, SW1A 1AA"
+    businessEmail: "hello@yourbusiness.com"
+    accountName: "Your Business Ltd"
+    accountNumber: "12345678"
+    sortCode: "12-34-56"
+    defaultCurrency: "GBP"
+    defaultPaymentTerms: "Payment due within 30 days of invoice date"
+

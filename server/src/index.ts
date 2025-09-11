@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
@@ -13,7 +13,7 @@ import { generateInvoicePdf } from "./shared/components/invoice-template.js";
 
 
 // Create server instance
-const server = new Server(
+const server = new McpServer(
   {
     name: "Invoice MCP Server",
     version: "0.1.0",
