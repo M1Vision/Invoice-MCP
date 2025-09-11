@@ -15,6 +15,9 @@ COPY server/package*.json ./server/
 # Install root dependencies first (without running prepare script)
 RUN npm install --production=false --ignore-scripts
 
+# Install root dependencies properly
+RUN npm install
+
 # Copy source code
 COPY . .
 
@@ -29,7 +32,11 @@ RUN mkdir -p build && cp -r server/build/* build/
 
 # Remove dev dependencies after build to reduce image size
 RUN npm prune --omit=dev
-RUN cd server && npm prune --omit=dev
+# Don't prune server dependencies as they're needed at runtime
+# RUN cd server && npm prune --omit=dev
+
+# Set NODE_PATH to include server node_modules
+ENV NODE_PATH=/app/server/node_modules:/app/node_modules
 
 # Create temp directory for invoice files
 RUN mkdir -p temp

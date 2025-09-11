@@ -1,11 +1,9 @@
-#!/usr/bin/env node
-import { createStatelessServer } from '@smithery/sdk/server/stateless.js';
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
-import { invoicePdfToolSchema } from "./lib/invoice-pdf-tool-schema.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import express from "express";
+import cors from "cors";
+import { randomUUID } from "node:crypto";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { Invoice, InvoiceItem, InvoiceSchema } from "./shared/types/invoice.js";
 import { join } from "path";
 import { generateInvoicePdf } from "./shared/components/invoice-template.js";
@@ -13,6 +11,7 @@ import { z } from "zod";
 
 // Configuration schema for Smithery
 const configSchema = z.object({
+  apiKey: z.string().describe("API key for authentication (Bearer token)"),
   logoUrl: z.string().optional().describe("Direct URL to logo image (JPG, PNG, WebP)"),
   businessName: z.string().optional().describe("Your business name"),
   businessAddress: z.string().optional().describe("Your business address"),
@@ -24,76 +23,166 @@ const configSchema = z.object({
   defaultPaymentTerms: z.string().default("Payment due within 30 days of invoice date").describe("Default payment terms"),
 });
 
-// Create MCP server function for Smithery
-function createMcpServer({ config }: { config: z.infer<typeof configSchema> }) {
-  console.log('Creating MCP server with config:', config);
+// Parse configuration from query parameters (Smithery dot-notation format)
+function parseConfig(query: any): z.infer<typeof configSchema> {
+  const config: any = {};
   
+  // Parse dot-notation parameters as per Smithery docs
+  for (const [key, value] of Object.entries(query)) {
+    if (typeof value === 'string') {
+      // Handle nested properties like "business.name"
+      const keys = key.split('.');
+      let current = config;
+      for (let i = 0; i < keys.length - 1; i++) {
+        if (!current[keys[i]]) current[keys[i]] = {};
+        current = current[keys[i]];
+      }
+      current[keys[keys.length - 1]] = value;
+    }
+  }
+  
+  // Set defaults and validate
+  const result = {
+    apiKey: config.apiKey || "default-api-key",
+    logoUrl: config.logoUrl,
+    businessName: config.businessName,
+    businessAddress: config.businessAddress,
+    businessEmail: config.businessEmail,
+    accountName: config.accountName,
+    accountNumber: config.accountNumber,
+    sortCode: config.sortCode,
+    defaultCurrency: config.defaultCurrency || "GBP",
+    defaultPaymentTerms: config.defaultPaymentTerms || "Payment due within 30 days of invoice date",
+  };
+  
+  // Validate with Zod schema
+  return configSchema.parse(result);
+}
+
+// Parse invoice description into structured data
+function parseInvoiceDescription(description: string, config: z.infer<typeof configSchema>): Invoice {
+  // This is a simplified parser - in a real implementation, you'd use NLP or structured input
+  const lines = description.split('\n').map(line => line.trim()).filter(line => line);
+  
+  // Extract client information
+  const clientName = lines.find(line => line.toLowerCase().includes('client') || line.toLowerCase().includes('customer'))?.split(':')[1]?.trim() || 'Client Name';
+  const clientEmail = lines.find(line => line.toLowerCase().includes('email'))?.split(':')[1]?.trim() || 'client@example.com';
+  const clientAddress = lines.find(line => line.toLowerCase().includes('address'))?.split(':')[1]?.trim() || 'Client Address';
+  
+  // Extract items (simplified - look for lines with numbers and descriptions)
+  const items: InvoiceItem[] = [];
+  let currentItem: Partial<InvoiceItem> = {};
+  
+  for (const line of lines) {
+    // Look for quantity and description patterns
+    const quantityMatch = line.match(/(\d+)\s+(.+?)\s+@\s+\$?(\d+\.?\d*)/);
+    if (quantityMatch) {
+      if (currentItem.description) {
+        items.push(currentItem as InvoiceItem);
+      }
+      currentItem = {
+        description: quantityMatch[2].trim(),
+        quantity: parseInt(quantityMatch[1]),
+        unitPrice: parseFloat(quantityMatch[3]),
+      };
+    } else if (line.includes('$') && currentItem.description) {
+      // Price line
+      const priceMatch = line.match(/\$?(\d+\.?\d*)/);
+      if (priceMatch) {
+        currentItem.unitPrice = parseFloat(priceMatch[1]);
+      }
+    }
+  }
+  
+  if (currentItem.description) {
+    items.push(currentItem as InvoiceItem);
+  }
+  
+  // If no items found, create a default item
+  if (items.length === 0) {
+    items.push({
+      description: "Service rendered",
+      quantity: 1,
+      unitPrice: 100.00,
+    });
+  }
+  
+  // Calculate totals
+  const subtotal = items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+  const taxRate = 0.20; // 20% tax
+  const tax = subtotal * taxRate;
+  const total = subtotal + tax;
+  
+  return {
+    id: `INV-${Date.now()}`,
+    date: new Date().toISOString().split('T')[0],
+    dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    business: {
+      name: config.businessName || "Your Business Name",
+      address: config.businessAddress || "Your Business Address",
+      email: config.businessEmail || "contact@yourbusiness.com",
+      accountName: config.accountName || "Your Account Name",
+      accountNumber: config.accountNumber || "12345678",
+      sortCode: config.sortCode || "12-34-56",
+    },
+    client: {
+      name: clientName,
+      email: clientEmail,
+      address: clientAddress,
+    },
+    items,
+    subtotal,
+    tax,
+    total,
+    currency: config.defaultCurrency || "GBP",
+    paymentTerms: config.defaultPaymentTerms || "Payment due within 30 days of invoice date",
+    logoUrl: config.logoUrl,
+  };
+}
+
+// Create MCP server function (per session as per official docs)
+function createMcpServer(config: z.infer<typeof configSchema>) {
   const server = new McpServer(
     {
       name: "Invoice MCP Server",
-      version: "0.1.0"
+      version: "0.1.0",
     },
     {
       capabilities: {
-        tools: {}
-      }
+        tools: {},
+      },
     }
   );
 
-  console.log('McpServer created, available methods:', Object.getOwnPropertyNames(server));
-  console.log('McpServer prototype methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(server)));
-
-  // List tools
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    try {
-      console.log('Handling ListTools request');
-      return {
-        tools: [
-          {
-            name: "generate-invoice-pdf",
-            description: "Creates and exports an invoice as a PDF",
-            inputSchema: invoicePdfToolSchema,
+  // Register the invoice generation tool using registerTool with JSON schema
+  server.registerTool(
+    "generate-invoice-pdf",
+    {
+      title: "Generate Invoice PDF",
+      description: "Generate a professional PDF invoice from natural language description",
+      inputSchema: {
+        type: "object",
+        properties: {
+          description: {
+            type: "string",
+            description: "Natural language description of the invoice to generate",
           },
-        ],
-      };
-    } catch (error) {
-      console.error('Error in ListTools handler:', error);
-      throw error;
-    }
-  });
-
-  // Call tools
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    try {
-      console.log('Handling CallTool request:', request.params.name);
-      if (request.params.name === "generate-invoice-pdf") {
-        const { invoice: invoiceData, outputPath } = request.params.arguments as {
-          invoice: Invoice;
-          outputPath: string;
-        };
-
-        // Apply default configuration values
-        const finalInvoiceData = {
-          ...invoiceData,
-          logoUrl: invoiceData.logoUrl || config.logoUrl,
-          sender: {
-            ...invoiceData.sender,
-            name: invoiceData.sender.name || config.businessName,
-            address: invoiceData.sender.address || config.businessAddress,
-            email: invoiceData.sender.email || config.businessEmail,
+          outputPath: {
+            type: "string",
+            description: "Filename for the generated PDF (will be saved to temp/ directory)",
+            default: "invoice.pdf",
           },
-          paymentInformation: {
-            ...invoiceData.paymentInformation,
-            accountName: invoiceData.paymentInformation.accountName || config.accountName,
-            accountNumber: invoiceData.paymentInformation.accountNumber || config.accountNumber,
-            sortCode: invoiceData.paymentInformation.sortCode || config.sortCode,
-          },
-          currency: invoiceData.currency || config.defaultCurrency,
-          paymentTerms: invoiceData.paymentTerms || config.defaultPaymentTerms,
-        };
-
-        // Calculate totals
-        const itemsWithTotals = finalInvoiceData.items.map((item: InvoiceItem) => ({
+        },
+        required: ["description"],
+      },
+    },
+    async ({ description, outputPath = "invoice.pdf" }) => {
+      try {
+        // Parse the description to extract invoice details
+        const invoiceData = parseInvoiceDescription(description, config);
+        
+        // Calculate totals (matching original logic)
+        const itemsWithTotals = invoiceData.items.map((item: InvoiceItem) => ({
           ...item,
           total: item.quantity * item.unitPrice,
         }));
@@ -102,13 +191,13 @@ function createMcpServer({ config }: { config: z.infer<typeof configSchema> }) {
           (sum: number, item: InvoiceItem) => sum + item.total,
           0
         );
-        const vatAmount = subtotal * finalInvoiceData.vatRate;
+        const vatAmount = subtotal * invoiceData.vatRate;
         const total = subtotal + vatAmount;
 
         const calculatedInvoice = {
-          ...finalInvoiceData,
-          date: new Date(finalInvoiceData.date),
-          dueDate: new Date(finalInvoiceData.dueDate),
+          ...invoiceData,
+          date: new Date(invoiceData.date),
+          dueDate: new Date(invoiceData.dueDate),
           items: itemsWithTotals,
           subtotal,
           vatAmount,
@@ -129,235 +218,283 @@ function createMcpServer({ config }: { config: z.infer<typeof configSchema> }) {
         }
 
         const validatedInvoice = validationResult.data;
-
-        // Use temp directory for container environment
-        const defaultPath = join(
-          process.cwd(),
-          "temp",
-          `invoice-${finalInvoiceData.invoiceNumber}.pdf`
-        );
-
-        const finalOutputPath = outputPath || defaultPath;
         
-        // Ensure temp directory exists
-        const { mkdir } = await import('fs/promises');
+        // Save to temp directory (web-accessible)
         const tempDir = join(process.cwd(), "temp");
-        try {
-          await mkdir(tempDir, { recursive: true });
-        } catch (error) {
-          // Directory might already exist
+        const fs = await import("fs");
+        if (!fs.existsSync(tempDir)) {
+          fs.mkdirSync(tempDir, { recursive: true });
         }
-
-        await generateInvoicePdf(validatedInvoice, finalOutputPath);
-
-        // Generate download URL for the created PDF
-        const filename = `invoice-${finalInvoiceData.invoiceNumber}.pdf`;
-        const downloadUrl = `/files/${filename}`;
         
+        const filename = `invoice-${validatedInvoice.invoiceNumber}.pdf`;
+        const filePath = join(tempDir, filename);
+        
+        await generateInvoicePdf(validatedInvoice, filePath);
+        
+        // Get the server URL for file access
+        const serverUrl = process.env.SERVER_URL || `http://localhost:${process.env.PORT || 8081}`;
+        const downloadUrl = `${serverUrl}/files/${filename}`;
+
         return {
           content: [
             {
               type: "text",
-              text: `Invoice PDF successfully created!\n\n📄 **Invoice:** ${finalInvoiceData.invoiceNumber}\n💰 **Total:** ${finalInvoiceData.currency} ${total.toFixed(2)}\n\n🔗 **Download URL:** ${downloadUrl}\n\n**Instructions:**\n1. Copy the download URL above\n2. Replace the domain with your actual Smithery deployment URL\n3. Example: https://your-server.smithery.ai${downloadUrl}\n\nThe PDF is available for download at the provided URL.`,
+              text: `✅ Invoice PDF generated successfully!\n\n📄 **File**: ${filename}\n🔗 **Download**: ${downloadUrl}\n\n**Invoice Details:**\n- Client: ${validatedInvoice.client.name}\n- Amount: ${validatedInvoice.currency} ${validatedInvoice.total.toFixed(2)}\n- Items: ${validatedInvoice.items.length} line items\n\nYou can download the PDF using the link above or access it via the /files endpoint.`,
             },
           ],
         };
       } catch (error) {
+        console.error("Error generating invoice PDF:", error);
         return {
-          content: [{ type: "text", text: `Failed to generate invoice PDF: ${error instanceof Error ? error.message : 'Unknown error'}` }],
+          content: [
+            {
+              type: "text",
+              text: `❌ Error generating invoice PDF: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+          isError: true,
         };
       }
-      throw new Error("Tool not found");
-    } catch (error) {
-      console.error('Error in CallTool handler:', error);
-      throw error;
     }
-  });
+  );
 
-  return server.server;
+  return server;
 }
 
-// Store the current configuration for authentication
-let currentConfig: any = null;
+// Create Express app
+const app = express();
+const port = process.env.PORT || 8081;
 
-// Create the stateless server using Smithery SDK
-const statelessServer = createStatelessServer(({ config }) => {
-  try {
-    console.log('Creating MCP server with config:', config);
-    currentConfig = config; // Store config for authentication
-    return createMcpServer({ config });
-  } catch (error) {
-    console.error('Error creating MCP server:', error);
-    throw error;
-  }
+// CORS configuration for MCP
+app.use(cors({
+  origin: '*',
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'mcp-session-id', '*'],
+  exposedHeaders: ['mcp-session-id', 'mcp-protocol-version']
+}));
+
+app.use(express.json());
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Add file serving capabilities
-import express from 'express';
-import { readFile, stat } from 'fs/promises';
-import { basename } from 'path';
-
-// Authentication middleware
-function authenticateRequest(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const authHeader = req.headers.authorization;
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      error: 'Unauthorized',
-      message: 'Bearer token required'
-    });
-  }
-  
-  const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-  
-  // Get the expected API key from Smithery configuration
-  const expectedApiKey = currentConfig?.apiKey || 'sk-m1vision-invoice-mcp-2024-09-11-abcdef1234567890';
-  
-  if (!token || token !== expectedApiKey) {
-    return res.status(401).json({
-      error: 'Unauthorized', 
-      message: 'Invalid API key'
-    });
-  }
-  
-  // Add token to request for use in handlers
-  (req as any).authToken = token;
-  next();
-}
-
-// Add health endpoint for Smithery scanning (no auth required)
-statelessServer.app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'healthy', 
-    service: 'Invoice MCP Server',
-    version: '0.1.0',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Add a simple MCP info endpoint for Smithery scanning (no auth required)
-statelessServer.app.get('/mcp/info', (req, res) => {
-  res.json({
-    name: "Invoice MCP Server",
-    version: "0.1.0",
-    description: "MCP server for creating professional PDF invoices using natural language",
-    tools: [
-      {
-        name: "generate-invoice-pdf",
-        description: "Creates and exports an invoice as a PDF",
-        inputSchema: {
-          type: "object",
-          properties: {
-            invoice: {
-              type: "object",
-              description: "Invoice data"
-            },
-            outputPath: {
-              type: "string",
-              description: "Path to save the PDF (optional)"
-            }
-          },
-          required: ["invoice"]
-        }
+// Well-known MCP configuration endpoint (required by Smithery)
+app.get('/.well-known/mcp-config', (req, res) => {
+  const configSchema = {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": `${req.protocol}://${req.get('host')}/.well-known/mcp-config`,
+    "title": "Invoice MCP Configuration",
+    "description": "Configuration for connecting to the Invoice MCP server",
+    "x-query-style": "dot+bracket",
+    "type": "object",
+    "properties": {
+      "apiKey": {
+        "type": "string",
+        "title": "API Key",
+        "description": "API key for authentication (Bearer token)",
+        "minLength": 10
+      },
+      "logoUrl": {
+        "type": "string",
+        "title": "Logo URL",
+        "description": "Direct URL to logo image (JPG, PNG, WebP)"
+      },
+      "businessName": {
+        "type": "string",
+        "title": "Business Name",
+        "description": "Your business name"
+      },
+      "businessAddress": {
+        "type": "string",
+        "title": "Business Address",
+        "description": "Your business address"
+      },
+      "businessEmail": {
+        "type": "string",
+        "title": "Business Email",
+        "description": "Your business email"
+      },
+      "accountName": {
+        "type": "string",
+        "title": "Account Name",
+        "description": "Bank account name"
+      },
+      "accountNumber": {
+        "type": "string",
+        "title": "Account Number",
+        "description": "Bank account number"
+      },
+      "sortCode": {
+        "type": "string",
+        "title": "Sort Code",
+        "description": "Bank sort code"
+      },
+      "defaultCurrency": {
+        "type": "string",
+        "title": "Default Currency",
+        "description": "Default currency (GBP, USD, CAD, EUR)",
+        "default": "GBP",
+        "enum": ["GBP", "USD", "CAD", "EUR"]
+      },
+      "defaultPaymentTerms": {
+        "type": "string",
+        "title": "Default Payment Terms",
+        "description": "Default payment terms",
+        "default": "Payment due within 30 days of invoice date"
       }
-    ]
-  });
+    },
+    "required": ["apiKey"],
+    "additionalProperties": false
+  };
+  
+  res.json(configSchema);
 });
 
-// Apply authentication to MCP endpoint
-statelessServer.app.use('/mcp', authenticateRequest);
+// File serving endpoints
+app.get('/files', (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const tempDir = path.join(process.cwd(), 'temp');
+  
+  if (!fs.existsSync(tempDir)) {
+    return res.json({ files: [] });
+  }
+  
+  const files = fs.readdirSync(tempDir).map((file: string) => ({
+    name: file,
+    url: `${req.protocol}://${req.get('host')}/files/${file}`,
+    size: fs.statSync(path.join(tempDir, file)).size,
+    created: fs.statSync(path.join(tempDir, file)).birthtime
+  }));
+  
+  res.json({ files });
+});
 
-// Serve generated PDF files
-statelessServer.app.get('/files/:filename', async (req, res) => {
+app.get('/files/:filename', (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const tempDir = path.join(process.cwd(), 'temp');
+  const filePath = path.join(tempDir, req.params.filename);
+  
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'File not found' });
+  }
+  
+  res.download(filePath);
+});
+
+app.delete('/files/:filename', (req, res) => {
+  const fs = require('fs');
+  const path = require('path');
+  const tempDir = path.join(process.cwd(), 'temp');
+  const filePath = path.join(tempDir, req.params.filename);
+  
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'File not found' });
+  }
+  
+  fs.unlinkSync(filePath);
+  res.json({ message: 'File deleted successfully' });
+});
+
+// Map to store transports by session ID
+const transports: { [sessionId: string]: StreamableHTTPServerTransport } = {};
+
+// Handle POST requests for client-to-server communication
+app.post('/mcp', async (req, res) => {
   try {
-    const filename = req.params.filename;
-    
-    // Security: Only allow PDF files and sanitize filename
-    if (!filename.endsWith('.pdf') || filename.includes('..') || filename.includes('/')) {
-      return res.status(400).json({ error: 'Invalid filename' });
+    console.log('MCP POST request received:', {
+      method: req.method,
+      headers: req.headers,
+      body: req.body
+    });
+
+    // Parse configuration from query parameters (Smithery format)
+    const config = parseConfig(req.query);
+    console.log('Parsed config:', config);
+
+    // Check for existing session ID
+    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+    let transport: StreamableHTTPServerTransport;
+
+    if (sessionId && transports[sessionId]) {
+      console.log('Reusing existing transport for session:', sessionId);
+      // Reuse existing transport
+      transport = transports[sessionId];
+    } else {
+      console.log('Creating new transport for request');
+      // Create new transport for any request (simplified for testing)
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (sessionId) => {
+          console.log('Session initialized:', sessionId);
+          // Store the transport by session ID
+          transports[sessionId] = transport;
+        },
+        // DNS rebinding protection is disabled by default for backwards compatibility
+        enableDnsRebindingProtection: false,
+      });
+
+      // Clean up transport when closed
+      transport.onclose = () => {
+        if (transport.sessionId) {
+          console.log('Transport closed for session:', transport.sessionId);
+          delete transports[transport.sessionId];
+        }
+      };
+
+      // Create server with config and connect to transport
+      console.log('Creating MCP server with config');
+      const server = createMcpServer(config);
+      await server.connect(transport);
     }
-    
-    const filePath = join(process.cwd(), 'temp', filename);
-    
-    // Check if file exists
-    try {
-      await stat(filePath);
-    } catch (error) {
-      return res.status(404).json({ error: 'File not found' });
-    }
-    
-    // Read and serve the file
-    const fileBuffer = await readFile(filePath);
-    
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${basename(filename)}"`);
-    res.setHeader('Content-Length', fileBuffer.length);
-    
-    res.send(fileBuffer);
+
+    // Handle the request
+    console.log('Handling request with transport');
+    await transport.handleRequest(req, res, req.body);
   } catch (error) {
-    console.error('Error serving file:', error);
-    res.status(500).json({ error: 'Failed to serve file' });
+    console.error('MCP POST request error:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : String(error)
+    });
   }
 });
 
-// List available files
-statelessServer.app.get('/files', async (req, res) => {
+// Reusable handler for GET and DELETE requests
+const handleSessionRequest = async (req: express.Request, res: express.Response) => {
   try {
-    const { readdir } = await import('fs/promises');
-    const tempDir = join(process.cwd(), 'temp');
-    
-    try {
-      const files = await readdir(tempDir);
-      const pdfFiles = files.filter(file => file.endsWith('.pdf'));
-      
-      const fileList = pdfFiles.map(filename => ({
-        filename,
-        downloadUrl: `/files/${filename}`,
-        fullUrl: `${req.protocol}://${req.get('host')}/files/${filename}`
-      }));
-      
-      res.json({ files: fileList });
-    } catch (error) {
-      res.json({ files: [] });
+    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+    if (!sessionId || !transports[sessionId]) {
+      res.status(400).send('Invalid or missing session ID');
+      return;
     }
+    
+    const transport = transports[sessionId];
+    await transport.handleRequest(req, res);
   } catch (error) {
-    console.error('Error listing files:', error);
-    res.status(500).json({ error: 'Failed to list files' });
+    console.error('MCP session request error:', error);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : String(error)
+    });
   }
-});
+};
 
-// Delete a specific file
-statelessServer.app.delete('/files/:filename', async (req, res) => {
-  try {
-    const filename = req.params.filename;
-    
-    // Security: Only allow PDF files and sanitize filename
-    if (!filename.endsWith('.pdf') || filename.includes('..') || filename.includes('/')) {
-      return res.status(400).json({ error: 'Invalid filename' });
-    }
-    
-    const filePath = join(process.cwd(), 'temp', filename);
-    const { unlink } = await import('fs/promises');
-    
-    try {
-      await unlink(filePath);
-      res.json({ message: 'File deleted successfully' });
-    } catch (error) {
-      res.status(404).json({ error: 'File not found' });
-    }
-  } catch (error) {
-    console.error('Error deleting file:', error);
-    res.status(500).json({ error: 'Failed to delete file' });
-  }
-});
+// Handle GET requests for server-to-client notifications via SSE
+app.get('/mcp', handleSessionRequest);
+
+// Handle DELETE requests for session termination
+app.delete('/mcp', handleSessionRequest);
 
 // Start server
-const PORT = process.env.PORT || 8081;
-statelessServer.app.listen(PORT, () => {
-  console.log(`Invoice MCP Server (Smithery) running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
-  console.log(`MCP endpoint: http://localhost:${PORT}/mcp`);
-  console.log(`File serving: http://localhost:${PORT}/files`);
+app.listen(port, () => {
+  console.log(`Invoice MCP Server running on port ${port}`);
+  console.log(`Health check: http://localhost:${port}/health`);
+  console.log(`MCP endpoint: http://localhost:${port}/mcp`);
+  console.log(`Config endpoint: http://localhost:${port}/.well-known/mcp-config`);
+  console.log(`Files endpoint: http://localhost:${port}/files`);
 });
-
-export default createMcpServer;

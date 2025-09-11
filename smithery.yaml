@@ -48,18 +48,11 @@ startCommand:
       defaultPaymentTerms:
         type: "string"
         description: "Default payment terms"
-        title: "Payment Terms"
+        title: "Default Payment Terms"
         default: "Payment due within 30 days of invoice date"
     required: ["apiKey"]
   exampleConfig:
     apiKey: "sk-m1vision-invoice-mcp-2024-09-11-abcdef1234567890"
-    logoUrl: "https://example.com/logo.png"
-    businessName: "Your Business Ltd"
-    businessAddress: "123 Business Street, London, SW1A 1AA"
-    businessEmail: "hello@yourbusiness.com"
-    accountName: "Your Business Ltd"
-    accountNumber: "12345678"
-    sortCode: "12-34-56"
+    businessName: "Your Business Name"
+    businessEmail: "contact@yourbusiness.com"
     defaultCurrency: "GBP"
-    defaultPaymentTerms: "Payment due within 30 days of invoice date"
-
