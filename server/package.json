@@ -11,10 +11,9 @@
     "build"
   ],
   "scripts": {
-    "build": "tsc && chmod 755 build/index.js && chmod 755 build/index-http.js && chmod 755 build/index-smithery.js",
-    "build:http": "tsc && chmod 755 build/index-http.js",
-    "build:smithery": "tsc && chmod 755 build/index-smithery.js",
-    "prepare": "npm run build",
+    "build": "tsc --project . && chmod +x build/index.js build/index-http.js build/index-smithery.js || true",
+    "build:http": "tsc --project . && chmod +x build/index-http.js || true",
+    "build:smithery": "tsc --project . && chmod +x build/index-smithery.js || true",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
     "start:http": "node build/index-http.js",

@@ -126,3 +126,4 @@ For smaller PDFs, you could modify the tool to return base64-encoded PDF data di
 - Try accessing the `/files` endpoint first to list available files
 - Check browser network tools for any CORS or security errors
 - Verify the file still exists on the server
+

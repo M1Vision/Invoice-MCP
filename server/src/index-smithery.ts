@@ -26,10 +26,17 @@ const configSchema = z.object({
 
 // Create MCP server function for Smithery
 function createMcpServer({ config }: { config: z.infer<typeof configSchema> }) {
-  const server = new McpServer({
-    name: "Invoice MCP Server",
-    version: "0.1.0"
-  });
+  const server = new McpServer(
+    {
+      name: "Invoice MCP Server",
+      version: "0.1.0"
+    },
+    {
+      capabilities: {
+        tools: {}
+      }
+    }
+  );
 
   // List tools
   server.setRequestHandler(ListToolsRequestSchema, async () => {

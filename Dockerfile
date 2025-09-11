@@ -12,12 +12,14 @@ COPY package*.json ./
 # Copy server package files
 COPY server/package*.json ./server/
 
-# Install dependencies in both locations
-RUN npm install --production=false
-RUN cd server && npm install --production=false
+# Install root dependencies first (without running prepare script)
+RUN npm install --production=false --ignore-scripts
 
 # Copy source code
 COPY . .
+
+# Install server dependencies
+RUN cd server && npm install --production=false
 
 # Build the server TypeScript project
 RUN cd server && npm run build
