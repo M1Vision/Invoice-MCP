@@ -7,6 +7,11 @@ startCommand:
   configSchema:
     type: "object"
     properties:
+      apiKey:
+        type: "string"
+        description: "API key for authentication (Bearer token)"
+        title: "API Key"
+        minLength: 10
       logoUrl:
         type: "string"
         description: "Direct URL to logo image (JPG, PNG, WebP)"
@@ -45,8 +50,9 @@ startCommand:
         description: "Default payment terms"
         title: "Payment Terms"
         default: "Payment due within 30 days of invoice date"
-    required: []
+    required: ["apiKey"]
   exampleConfig:
+    apiKey: "sk-m1vision-invoice-mcp-2024-09-11-abcdef1234567890"
     logoUrl: "https://example.com/logo.png"
     businessName: "Your Business Ltd"
     businessAddress: "123 Business Street, London, SW1A 1AA"

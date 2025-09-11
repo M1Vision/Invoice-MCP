@@ -40,21 +40,28 @@ function createMcpServer({ config }: { config: z.infer<typeof configSchema> }) {
 
   // List tools
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools: [
-        {
-          name: "generate-invoice-pdf",
-          description: "Creates and exports an invoice as a PDF",
-          inputSchema: invoicePdfToolSchema,
-        },
-      ],
-    };
+    try {
+      console.log('Handling ListTools request');
+      return {
+        tools: [
+          {
+            name: "generate-invoice-pdf",
+            description: "Creates and exports an invoice as a PDF",
+            inputSchema: invoicePdfToolSchema,
+          },
+        ],
+      };
+    } catch (error) {
+      console.error('Error in ListTools handler:', error);
+      throw error;
+    }
   });
 
   // Call tools
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    if (request.params.name === "generate-invoice-pdf") {
-      try {
+    try {
+      console.log('Handling CallTool request:', request.params.name);
+      if (request.params.name === "generate-invoice-pdf") {
         const { invoice: invoiceData, outputPath } = request.params.arguments as {
           invoice: Invoice;
           outputPath: string;
@@ -155,20 +162,105 @@ function createMcpServer({ config }: { config: z.infer<typeof configSchema> }) {
           content: [{ type: "text", text: `Failed to generate invoice PDF: ${error instanceof Error ? error.message : 'Unknown error'}` }],
         };
       }
+      throw new Error("Tool not found");
+    } catch (error) {
+      console.error('Error in CallTool handler:', error);
+      throw error;
     }
-    throw new Error("Tool not found");
   });
 
   return server.server;
 }
 
+// Store the current configuration for authentication
+let currentConfig: any = null;
+
 // Create the stateless server using Smithery SDK
-const statelessServer = createStatelessServer(createMcpServer);
+const statelessServer = createStatelessServer(({ config }) => {
+  try {
+    console.log('Creating MCP server with config:', config);
+    currentConfig = config; // Store config for authentication
+    return createMcpServer({ config });
+  } catch (error) {
+    console.error('Error creating MCP server:', error);
+    throw error;
+  }
+});
 
 // Add file serving capabilities
 import express from 'express';
 import { readFile, stat } from 'fs/promises';
 import { basename } from 'path';
+
+// Authentication middleware
+function authenticateRequest(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Bearer token required'
+    });
+  }
+  
+  const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+  
+  // Get the expected API key from Smithery configuration
+  const expectedApiKey = currentConfig?.apiKey || 'sk-m1vision-invoice-mcp-2024-09-11-abcdef1234567890';
+  
+  if (!token || token !== expectedApiKey) {
+    return res.status(401).json({
+      error: 'Unauthorized', 
+      message: 'Invalid API key'
+    });
+  }
+  
+  // Add token to request for use in handlers
+  (req as any).authToken = token;
+  next();
+}
+
+// Add health endpoint for Smithery scanning (no auth required)
+statelessServer.app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    service: 'Invoice MCP Server',
+    version: '0.1.0',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Add a simple MCP info endpoint for Smithery scanning (no auth required)
+statelessServer.app.get('/mcp/info', (req, res) => {
+  res.json({
+    name: "Invoice MCP Server",
+    version: "0.1.0",
+    description: "MCP server for creating professional PDF invoices using natural language",
+    tools: [
+      {
+        name: "generate-invoice-pdf",
+        description: "Creates and exports an invoice as a PDF",
+        inputSchema: {
+          type: "object",
+          properties: {
+            invoice: {
+              type: "object",
+              description: "Invoice data"
+            },
+            outputPath: {
+              type: "string",
+              description: "Path to save the PDF (optional)"
+            }
+          },
+          required: ["invoice"]
+        }
+      }
+    ]
+  });
+});
+
+// Apply authentication to MCP endpoint
+statelessServer.app.use('/mcp', authenticateRequest);
 
 // Serve generated PDF files
 statelessServer.app.get('/files/:filename', async (req, res) => {
