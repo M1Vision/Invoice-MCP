@@ -13,8 +13,8 @@ COPY package*.json ./
 COPY server/package*.json ./server/
 
 # Install dependencies in both locations
-RUN npm ci
-RUN cd server && npm ci
+RUN npm install --production=false
+RUN cd server && npm install --production=false
 
 # Copy source code
 COPY . .
