@@ -1,58 +1,51 @@
-runtime: "container"
+# Smithery configuration file: https://smithery.ai/docs/build/project-config
+
+runtime: container
 build:
-  dockerfile: "Dockerfile"
-  dockerBuildPath: "."
+  dockerfile: Dockerfile
+  dockerBuildPath: .
 startCommand:
-  type: "http"
+  type: http
   configSchema:
-    type: "object"
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - apiKey
     properties:
       apiKey:
-        type: "string"
-        description: "API key for authentication (Bearer token)"
-        title: "API Key"
-        minLength: 10
+        type: string
+        description: API key for authentication (Bearer token)
       logoUrl:
-        type: "string"
-        description: "Direct URL to logo image (JPG, PNG, WebP)"
-        title: "Logo URL"
+        type: string
+        description: Direct URL to logo image (JPG, PNG, WebP)
       businessName:
-        type: "string"
-        description: "Your business name"
-        title: "Business Name"
+        type: string
+        description: Your business name
       businessAddress:
-        type: "string"
-        description: "Your business address"
-        title: "Business Address"
+        type: string
+        description: Your business address
       businessEmail:
-        type: "string"
-        description: "Your business email"
-        title: "Business Email"
+        type: string
+        description: Your business email
       accountName:
-        type: "string"
-        description: "Bank account name"
-        title: "Account Name"
+        type: string
+        description: Bank account name
       accountNumber:
-        type: "string"
-        description: "Bank account number"
-        title: "Account Number"
+        type: string
+        description: Bank account number
       sortCode:
-        type: "string"
-        description: "Bank sort code"
-        title: "Sort Code"
+        type: string
+        description: Bank sort code
       defaultCurrency:
-        type: "string"
-        description: "Default currency (GBP, USD, CAD, EUR)"
-        title: "Default Currency"
-        default: "GBP"
+        type: string
+        default: GBP
+        description: Default currency (GBP, USD, CAD, EUR)
       defaultPaymentTerms:
-        type: "string"
-        description: "Default payment terms"
-        title: "Default Payment Terms"
-        default: "Payment due within 30 days of invoice date"
-    required: ["apiKey"]
+        type: string
+        default: Payment due within 30 days of invoice date
+        description: Default payment terms
   exampleConfig:
-    apiKey: "sk-m1vision-invoice-mcp-2024-09-11-abcdef1234567890"
-    businessName: "Your Business Name"
-    businessEmail: "contact@yourbusiness.com"
-    defaultCurrency: "GBP"
+    apiKey: sk-m1vision-invoice-mcp-2024-09-11-abcdef1234567890
+    businessName: Your Business Name
+    businessEmail: contact@yourbusiness.com
+    defaultCurrency: GBP
