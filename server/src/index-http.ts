@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CallToolRequestSchema,
@@ -38,7 +38,7 @@ function parseConfig(req: express.Request) {
 }
 
 // Create server instance
-const server = new McpServer(
+const server = new Server(
   {
     name: "Invoice MCP Server",
     version: "0.1.0",

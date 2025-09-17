@@ -1,9 +1,13 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  isInitializeRequest,
+} from "@modelcontextprotocol/sdk/types.js";
 import express from "express";
 import cors from "cors";
 import { randomUUID } from "node:crypto";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { Invoice, InvoiceItem, InvoiceSchema } from "./shared/types/invoice.js";
 import { join } from "path";
 import { generateInvoicePdf } from "./shared/components/invoice-template.js";
@@ -104,19 +108,20 @@ function parseInvoiceDescription(description: string, config: z.infer<typeof con
       description: "Service rendered",
       quantity: 1,
       unitPrice: 100.00,
+      total: 100.00,
     });
   }
   
   // Calculate totals
   const subtotal = items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
-  const taxRate = 0.20; // 20% tax
-  const tax = subtotal * taxRate;
-  const total = subtotal + tax;
-  
+  const vatRate = 0.20; // 20% VAT
+  const vatAmount = subtotal * vatRate;
+  const total = subtotal + vatAmount;
+
   return {
-    id: `INV-${Date.now()}`,
-    date: new Date().toISOString().split('T')[0],
-    dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    invoiceNumber: `INV-${Date.now()}`,
+    date: new Date(),
+    dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     business: {
       name: config.businessName || "Your Business Name",
       address: config.businessAddress || "Your Business Address",
@@ -125,24 +130,24 @@ function parseInvoiceDescription(description: string, config: z.infer<typeof con
       accountNumber: config.accountNumber || "12345678",
       sortCode: config.sortCode || "12-34-56",
     },
-    client: {
+    customer: {
       name: clientName,
       email: clientEmail,
       address: clientAddress,
     },
     items,
     subtotal,
-    tax,
+    vatRate,
+    vatAmount,
     total,
-    currency: config.defaultCurrency || "GBP",
-    paymentTerms: config.defaultPaymentTerms || "Payment due within 30 days of invoice date",
-    logoUrl: config.logoUrl,
+    currency: (config.defaultCurrency as "GBP" | "USD" | "CAD" | "EUR") || "GBP",
+    terms: config.defaultPaymentTerms || "Payment due within 30 days of invoice date",
   };
 }
 
 // Create MCP server function (per session as per official docs)
 function createMcpServer(config: z.infer<typeof configSchema>) {
-  const server = new McpServer(
+  const server = new Server(
     {
       name: "Invoice MCP Server",
       version: "0.1.0",
@@ -154,29 +159,42 @@ function createMcpServer(config: z.infer<typeof configSchema>) {
     }
   );
 
-  // Register the invoice generation tool using registerTool with JSON schema
-  server.registerTool(
-    "generate-invoice-pdf",
-    {
-      title: "Generate Invoice PDF",
-      description: "Generate a professional PDF invoice from natural language description",
-      inputSchema: {
-        type: "object",
-        properties: {
-          description: {
-            type: "string",
-            description: "Natural language description of the invoice to generate",
-          },
-          outputPath: {
-            type: "string",
-            description: "Filename for the generated PDF (will be saved to temp/ directory)",
-            default: "invoice.pdf",
+  // Set up request handlers using the low-level API
+
+  // List tools handler
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    return {
+      tools: [
+        {
+          name: "generate-invoice-pdf",
+          description: "Generate a professional PDF invoice from natural language description",
+          inputSchema: {
+            type: "object",
+            properties: {
+              description: {
+                type: "string",
+                description: "Natural language description of the invoice to generate",
+              },
+              outputPath: {
+                type: "string",
+                description: "Filename for the generated PDF (will be saved to temp/ directory)",
+                default: "invoice.pdf",
+              },
+            },
+            required: ["description"],
           },
         },
-        required: ["description"],
-      },
-    },
-    async ({ description, outputPath = "invoice.pdf" }) => {
+      ],
+    };
+  });
+
+  // Call tool handler
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (request.params.name === "generate-invoice-pdf") {
+      const { description, outputPath = "invoice.pdf" } = request.params.arguments as {
+        description: string;
+        outputPath?: string;
+      };
       try {
         // Parse the description to extract invoice details
         const invoiceData = parseInvoiceDescription(description, config);
@@ -239,7 +257,7 @@ function createMcpServer(config: z.infer<typeof configSchema>) {
           content: [
             {
               type: "text",
-              text: `✅ Invoice PDF generated successfully!\n\n📄 **File**: ${filename}\n🔗 **Download**: ${downloadUrl}\n\n**Invoice Details:**\n- Client: ${validatedInvoice.client.name}\n- Amount: ${validatedInvoice.currency} ${validatedInvoice.total.toFixed(2)}\n- Items: ${validatedInvoice.items.length} line items\n\nYou can download the PDF using the link above or access it via the /files endpoint.`,
+              text: `✅ Invoice PDF generated successfully!\n\n📄 **File**: ${filename}\n🔗 **Download**: ${downloadUrl}\n\n**Invoice Details:**\n- Client: ${validatedInvoice.customer.name}\n- Amount: ${validatedInvoice.currency} ${validatedInvoice.total.toFixed(2)}\n- Items: ${validatedInvoice.items.length} line items\n\nYou can download the PDF using the link above or access it via the /files endpoint.`,
             },
           ],
         };
@@ -256,7 +274,9 @@ function createMcpServer(config: z.infer<typeof configSchema>) {
         };
       }
     }
-  );
+    
+    throw new Error("Tool not found");
+  });
 
   return server;
 }
