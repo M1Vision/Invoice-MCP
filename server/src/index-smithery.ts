@@ -163,29 +163,30 @@ function createMcpServer(config: z.infer<typeof configSchema>) {
 
   // List tools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools: [
-        {
-          name: "generate-invoice-pdf",
-          description: "Generate a professional PDF invoice from natural language description",
-          inputSchema: {
-            type: "object",
-            properties: {
-              description: {
-                type: "string",
-                description: "Natural language description of the invoice to generate",
-              },
-              outputPath: {
-                type: "string",
-                description: "Filename for the generated PDF (will be saved to temp/ directory)",
-                default: "invoice.pdf",
-              },
+    console.log('ListToolsRequestSchema handler called - returning tools');
+    const tools = [
+      {
+        name: "generate-invoice-pdf",
+        description: "Generate a professional PDF invoice from natural language description",
+        inputSchema: {
+          type: "object",
+          properties: {
+            description: {
+              type: "string",
+              description: "Natural language description of the invoice to generate",
             },
-            required: ["description"],
+            outputPath: {
+              type: "string",
+              description: "Filename for the generated PDF (will be saved to temp/ directory)",
+              default: "invoice.pdf",
+            },
           },
+          required: ["description"],
         },
-      ],
-    };
+      },
+    ];
+    console.log('Returning tools:', JSON.stringify(tools, null, 2));
+    return { tools };
   });
 
   // Call tool handler
@@ -428,6 +429,7 @@ app.post('/mcp', async (req, res) => {
   try {
     console.log('MCP POST request received:', {
       method: req.method,
+      url: req.url,
       headers: req.headers,
       body: req.body
     });
@@ -444,9 +446,9 @@ app.post('/mcp', async (req, res) => {
       console.log('Reusing existing transport for session:', sessionId);
       // Reuse existing transport
       transport = transports[sessionId];
-    } else {
-      console.log('Creating new transport for request');
-      // Create new transport for any request (simplified for testing)
+    } else if (!sessionId && isInitializeRequest(req.body)) {
+      console.log('New initialization request - creating transport and server');
+      // New initialization request
       transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (sessionId) => {
@@ -467,9 +469,22 @@ app.post('/mcp', async (req, res) => {
       };
 
       // Create server with config and connect to transport
-      console.log('Creating MCP server with config');
+      console.log('Creating MCP server with config:', config);
       const server = createMcpServer(config);
+      console.log('Connecting server to transport');
       await server.connect(transport);
+      console.log('Server connected successfully');
+    } else {
+      // Invalid request
+      console.log('Invalid request - no session ID and not an initialize request');
+      return res.status(400).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32000,
+          message: 'Bad Request: No valid session ID provided or not an initialize request',
+        },
+        id: null,
+      });
     }
 
     // Handle the request
@@ -477,10 +492,16 @@ app.post('/mcp', async (req, res) => {
     await transport.handleRequest(req, res, req.body);
   } catch (error) {
     console.error('MCP POST request error:', error);
-    res.status(500).json({ 
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : String(error)
-    });
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        jsonrpc: '2.0',
+        error: {
+          code: -32603,
+          message: 'Internal server error',
+        },
+        id: null,
+      });
+    }
   }
 });
 
