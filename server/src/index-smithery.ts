@@ -3,6 +3,8 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ListPromptsRequestSchema,
   isInitializeRequest,
 } from "@modelcontextprotocol/sdk/types.js";
 import express from "express";
@@ -155,11 +157,25 @@ function createMcpServer(config: z.infer<typeof configSchema>) {
     {
       capabilities: {
         tools: {},
+        resources: {},
+        prompts: {},
       },
     }
   );
 
   // Set up request handlers using the low-level API
+
+  // Add missing resource handler
+  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    console.log('ListResourcesRequestSchema handler called - returning empty resources');
+    return { resources: [] };
+  });
+
+  // Add missing prompts handler  
+  server.setRequestHandler(ListPromptsRequestSchema, async () => {
+    console.log('ListPromptsRequestSchema handler called - returning empty prompts');
+    return { prompts: [] };
+  });
 
   // List tools handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -469,10 +485,17 @@ app.post('/mcp', async (req, res) => {
       };
 
       // Create server with config and connect to transport
-      console.log('Creating MCP server with config:', config);
+      console.log('Creating MCP server with config');
       const server = createMcpServer(config);
       console.log('Connecting server to transport');
-      await server.connect(transport);
+      
+      // Use a timeout to prevent hanging
+      const connectPromise = server.connect(transport);
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Server connection timeout')), 5000);
+      });
+      
+      await Promise.race([connectPromise, timeoutPromise]);
       console.log('Server connected successfully');
     } else {
       // Invalid request
