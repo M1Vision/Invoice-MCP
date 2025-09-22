@@ -284,7 +284,7 @@ function createMcpServer(config: z.infer<typeof configSchema>) {
 
 // Create Express app
 const app = express();
-const port = process.env.PORT || 8081;
+const port = parseInt(process.env.PORT || '8081', 10);
 
 // CORS configuration for MCP
 app.use(cors({
@@ -531,8 +531,8 @@ app.get('/mcp', handleSessionRequest);
 // Handle DELETE requests for session termination
 app.delete('/mcp', handleSessionRequest);
 
-// Start server
-app.listen(port, () => {
+// Start server (bind to all interfaces for Docker)
+app.listen(port, '0.0.0.0', () => {
   console.log(`Invoice MCP Server running on port ${port}`);
   console.log(`Health check: http://localhost:${port}/health`);
   console.log(`MCP endpoint: http://localhost:${port}/mcp`);
