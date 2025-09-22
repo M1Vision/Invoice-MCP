@@ -554,6 +554,22 @@ app.get('/mcp', handleSessionRequest);
 // Handle DELETE requests for session termination
 app.delete('/mcp', handleSessionRequest);
 
+// Add global request timeout
+app.use((req, res, next) => {
+  res.setTimeout(30000, () => {
+    console.log('Request timeout after 30 seconds');
+    res.status(408).json({
+      jsonrpc: '2.0',
+      error: {
+        code: -32603,
+        message: 'Request timeout',
+      },
+      id: null,
+    });
+  });
+  next();
+});
+
 // Start server (bind to all interfaces for Docker)
 app.listen(port, '0.0.0.0', () => {
   console.log(`Invoice MCP Server running on port ${port}`);
