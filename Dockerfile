@@ -6,23 +6,24 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 RUN npm install -g typescript
 
+# Copy npm configuration
+COPY .npmrc ./
+
 # Copy root package files
 COPY package*.json ./
 
-# Copy server package files
+# Copy server package files and npmrc
 COPY server/package*.json ./server/
+COPY server/.npmrc ./server/
 
-# Install root dependencies first (without running prepare script)
-RUN npm install --production=false --ignore-scripts
-
-# Install root dependencies properly
-RUN npm install
+# Install root dependencies with explicit registry
+RUN npm install --production=false --registry=https://registry.npmjs.org/
 
 # Copy source code
 COPY . .
 
-# Install server dependencies
-RUN cd server && npm install --production=false
+# Install server dependencies with explicit registry
+RUN cd server && npm install --production=false --registry=https://registry.npmjs.org/
 
 # Build the server TypeScript project
 RUN cd server && npm run build
