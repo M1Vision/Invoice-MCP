@@ -135,11 +135,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const filename = `invoice-${invoiceData.invoiceNumber}.pdf`;
       const downloadUrl = `/files/${filename}`;
       
+      // Store invoice metadata for better tracking
+      const invoiceMetadata: InvoiceMetadata = {
+        invoiceNumber: invoiceData.invoiceNumber,
+        filename,
+        downloadUrl,
+        createdAt: new Date().toISOString(),
+        total: total.toFixed(2),
+        currency: invoiceData.currency || 'GBP',
+        clientName: invoiceData.customer.name,
+        status: 'generated'
+      };
+      
+      // Save metadata to a simple JSON file for tracking
+      await saveInvoiceMetadata(invoiceMetadata);
+      
       return {
         content: [
           {
             type: "text",
-            text: `Invoice PDF successfully created!\n\n📄 **Invoice:** ${invoiceData.invoiceNumber}\n💰 **Total:** ${invoiceData.currency || 'GBP'} ${total.toFixed(2)}\n\n🔗 **Download URL:** ${downloadUrl}\n\n**Instructions:**\n1. Copy the download URL above\n2. Replace the domain with your actual server URL\n3. Example: https://your-server.smithery.ai${downloadUrl}\n\nThe PDF is available for download at the provided URL.`,
+            text: `✅ **Invoice PDF Successfully Generated!**\n\n📄 **Invoice:** ${invoiceData.invoiceNumber}\n👤 **Client:** ${invoiceData.customer.name}\n💰 **Total:** ${invoiceData.currency || 'GBP'} ${total.toFixed(2)}\n📅 **Created:** ${new Date().toLocaleString()}\n\n🔗 **Direct Download URL:** ${downloadUrl}\n\n**Quick Access:**\n• View all invoices: GET /files\n• Download this invoice: GET ${downloadUrl}\n• Invoice metadata: GET /invoices/${invoiceData.invoiceNumber}\n\n**For web access, use your server's full URL:**\n\`https://your-server-domain.com${downloadUrl}\``,
           },
         ],
       };
@@ -245,8 +260,57 @@ app.delete('/mcp', async (req, res) => {
 });
 
 // Add file serving capabilities
-import { readFile, stat } from 'fs/promises';
+import { readFile, stat, writeFile } from 'fs/promises';
 import { basename } from 'path';
+
+// Invoice metadata management
+interface InvoiceMetadata {
+  invoiceNumber: string;
+  filename: string;
+  downloadUrl: string;
+  createdAt: string;
+  total: string;
+  currency: string;
+  clientName: string;
+  status: 'generated' | 'sent' | 'paid';
+}
+
+async function saveInvoiceMetadata(metadata: InvoiceMetadata): Promise<void> {
+  try {
+    const metadataPath = join(process.cwd(), 'temp', 'invoices-metadata.json');
+    let existingData: InvoiceMetadata[] = [];
+    
+    try {
+      const existingContent = await readFile(metadataPath, 'utf-8');
+      existingData = JSON.parse(existingContent);
+    } catch (error) {
+      // File doesn't exist yet, start with empty array
+    }
+    
+    // Remove existing entry with same invoice number and add new one
+    existingData = existingData.filter(inv => inv.invoiceNumber !== metadata.invoiceNumber);
+    existingData.push(metadata);
+    
+    await writeFile(metadataPath, JSON.stringify(existingData, null, 2));
+  } catch (error) {
+    console.error('Error saving invoice metadata:', error);
+  }
+}
+
+async function getInvoiceMetadata(): Promise<InvoiceMetadata[]> {
+  try {
+    const metadataPath = join(process.cwd(), 'temp', 'invoices-metadata.json');
+    const content = await readFile(metadataPath, 'utf-8');
+    return JSON.parse(content);
+  } catch (error) {
+    return [];
+  }
+}
+
+async function getInvoiceMetadataByNumber(invoiceNumber: string): Promise<InvoiceMetadata | null> {
+  const allMetadata = await getInvoiceMetadata();
+  return allMetadata.find(inv => inv.invoiceNumber === invoiceNumber) || null;
+}
 
 // Serve generated PDF files
 app.get('/files/:filename', async (req, res) => {
@@ -281,29 +345,151 @@ app.get('/files/:filename', async (req, res) => {
   }
 });
 
-// List available files
+// List available files with enhanced metadata
 app.get('/files', async (req, res) => {
   try {
     const { readdir } = await import('fs/promises');
     const tempDir = join(process.cwd(), 'temp');
+    const metadata = await getInvoiceMetadata();
     
     try {
       const files = await readdir(tempDir);
       const pdfFiles = files.filter(file => file.endsWith('.pdf'));
       
-      const fileList = pdfFiles.map(filename => ({
-        filename,
-        downloadUrl: `/files/${filename}`,
-        fullUrl: `${req.protocol}://${req.get('host')}/files/${filename}`
-      }));
+      const fileList = pdfFiles.map(filename => {
+        const invoiceNumber = filename.replace('invoice-', '').replace('.pdf', '');
+        const metaData = metadata.find(m => m.filename === filename);
+        
+        return {
+          filename,
+          invoiceNumber,
+          downloadUrl: `/files/${filename}`,
+          fullUrl: `${req.protocol}://${req.get('host')}/files/${filename}`,
+          metadata: metaData || null
+        };
+      });
       
-      res.json({ files: fileList });
+      res.json({ 
+        files: fileList,
+        total: fileList.length,
+        serverUrl: `${req.protocol}://${req.get('host')}`
+      });
     } catch (error) {
-      res.json({ files: [] });
+      res.json({ files: [], total: 0 });
     }
   } catch (error) {
     console.error('Error listing files:', error);
     res.status(500).json({ error: 'Failed to list files' });
+  }
+});
+
+// Get all invoices with metadata
+app.get('/invoices', async (req, res) => {
+  try {
+    const metadata = await getInvoiceMetadata();
+    const enhancedMetadata = metadata.map(invoice => ({
+      ...invoice,
+      fullDownloadUrl: `${req.protocol}://${req.get('host')}${invoice.downloadUrl}`
+    }));
+    
+    res.json({ 
+      invoices: enhancedMetadata,
+      total: enhancedMetadata.length,
+      serverUrl: `${req.protocol}://${req.get('host')}`
+    });
+  } catch (error) {
+    console.error('Error fetching invoices:', error);
+    res.status(500).json({ error: 'Failed to fetch invoices' });
+  }
+});
+
+// Get specific invoice metadata
+app.get('/invoices/:invoiceNumber', async (req, res) => {
+  try {
+    const invoiceNumber = req.params.invoiceNumber;
+    const metadata = await getInvoiceMetadataByNumber(invoiceNumber);
+    
+    if (!metadata) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+    
+    const enhancedMetadata = {
+      ...metadata,
+      fullDownloadUrl: `${req.protocol}://${req.get('host')}${metadata.downloadUrl}`
+    };
+    
+    res.json(enhancedMetadata);
+  } catch (error) {
+    console.error('Error fetching invoice:', error);
+    res.status(500).json({ error: 'Failed to fetch invoice' });
+  }
+});
+
+// Update invoice status
+app.patch('/invoices/:invoiceNumber/status', async (req, res) => {
+  try {
+    const invoiceNumber = req.params.invoiceNumber;
+    const { status } = req.body;
+    
+    if (!['generated', 'sent', 'paid'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status. Must be: generated, sent, or paid' });
+    }
+    
+    const metadata = await getInvoiceMetadata();
+    const invoiceIndex = metadata.findIndex(inv => inv.invoiceNumber === invoiceNumber);
+    
+    if (invoiceIndex === -1) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+    
+    metadata[invoiceIndex].status = status;
+    
+    // Save updated metadata
+    const metadataPath = join(process.cwd(), 'temp', 'invoices-metadata.json');
+    await writeFile(metadataPath, JSON.stringify(metadata, null, 2));
+    
+    res.json({ 
+      message: 'Invoice status updated successfully',
+      invoice: {
+        ...metadata[invoiceIndex],
+        fullDownloadUrl: `${req.protocol}://${req.get('host')}${metadata[invoiceIndex].downloadUrl}`
+      }
+    });
+  } catch (error) {
+    console.error('Error updating invoice status:', error);
+    res.status(500).json({ error: 'Failed to update invoice status' });
+  }
+});
+
+// Delete invoice
+app.delete('/invoices/:invoiceNumber', async (req, res) => {
+  try {
+    const invoiceNumber = req.params.invoiceNumber;
+    const metadata = await getInvoiceMetadata();
+    const invoice = metadata.find(inv => inv.invoiceNumber === invoiceNumber);
+    
+    if (!invoice) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+    
+    // Delete PDF file
+    const filePath = join(process.cwd(), 'temp', invoice.filename);
+    try {
+      const { unlink } = await import('fs/promises');
+      await unlink(filePath);
+    } catch (error) {
+      console.error('Error deleting PDF file:', error);
+    }
+    
+    // Remove from metadata
+    const updatedMetadata = metadata.filter(inv => inv.invoiceNumber !== invoiceNumber);
+    const metadataPath = join(process.cwd(), 'temp', 'invoices-metadata.json');
+    await writeFile(metadataPath, JSON.stringify(updatedMetadata, null, 2));
+    
+    res.json({ message: 'Invoice deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting invoice:', error);
+    res.status(500).json({ error: 'Failed to delete invoice' });
   }
 });
 

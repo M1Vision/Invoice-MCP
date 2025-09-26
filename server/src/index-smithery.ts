@@ -12,7 +12,8 @@ import cors from "cors";
 import { randomUUID } from "node:crypto";
 import { Invoice, InvoiceItem, InvoiceSchema } from "./shared/types/invoice.js";
 import { join } from "path";
-import { generateInvoicePdf } from "./shared/components/invoice-template.js";
+import { generateInvoicePdfBuffer } from "./shared/components/invoice-template.js";
+import { uploadToCloudStorage, saveInvoiceMetadataToCloud, InvoiceMetadata } from "./shared/utils/cloud-storage.js";
 import { z } from "zod";
 
 // Configuration schema for Smithery
@@ -254,27 +255,34 @@ function createMcpServer(config: z.infer<typeof configSchema>) {
 
         const validatedInvoice = validationResult.data;
         
-        // Save to temp directory (web-accessible)
-        const tempDir = join(process.cwd(), "temp");
-        const fs = await import("fs");
-        if (!fs.existsSync(tempDir)) {
-          fs.mkdirSync(tempDir, { recursive: true });
-        }
-        
+        // Generate PDF in memory and upload to cloud storage
         const filename = `invoice-${validatedInvoice.invoiceNumber}.pdf`;
-        const filePath = join(tempDir, filename);
         
-        await generateInvoicePdf(validatedInvoice, filePath);
+        // Generate PDF to buffer instead of file
+        const pdfBuffer = await generateInvoicePdfBuffer(validatedInvoice);
         
-        // Get the server URL for file access
-        const serverUrl = process.env.SERVER_URL || `http://localhost:${process.env.PORT || 8081}`;
-        const downloadUrl = `${serverUrl}/files/${filename}`;
+        // Upload to cloud storage and get public URL
+        const downloadUrl = await uploadToCloudStorage(pdfBuffer, filename);
+        
+        // Store invoice metadata
+        const invoiceMetadata: InvoiceMetadata = {
+          invoiceNumber: validatedInvoice.invoiceNumber,
+          filename,
+          downloadUrl,
+          createdAt: new Date().toISOString(),
+          total: total.toFixed(2),
+          currency: validatedInvoice.currency,
+          clientName: validatedInvoice.customer.name,
+          status: 'generated'
+        };
+        
+        await saveInvoiceMetadataToCloud(invoiceMetadata);
 
         return {
           content: [
             {
               type: "text",
-              text: `✅ Invoice PDF generated successfully!\n\n📄 **File**: ${filename}\n🔗 **Download**: ${downloadUrl}\n\n**Invoice Details:**\n- Client: ${validatedInvoice.customer.name}\n- Amount: ${validatedInvoice.currency} ${validatedInvoice.total.toFixed(2)}\n- Items: ${validatedInvoice.items.length} line items\n\nYou can download the PDF using the link above or access it via the /files endpoint.`,
+              text: `✅ **Invoice PDF Successfully Generated & Stored!**\n\n📄 **Invoice:** ${validatedInvoice.invoiceNumber}\n👤 **Client:** ${validatedInvoice.customer.name}\n💰 **Total:** ${validatedInvoice.currency} ${total.toFixed(2)}\n📅 **Created:** ${new Date().toLocaleString()}\n\n🔗 **Download URL:** ${downloadUrl}\n\n**Cloud Storage Features:**\n• ✅ Permanently accessible via URL\n• ✅ No server dependency\n• ✅ Automatic backup & redundancy\n• ✅ Global CDN distribution\n\n**Access Methods:**\n• Direct download: Click the URL above\n• Share with clients: Send the URL directly\n• Embed in emails: Use the URL in email templates\n\n*Note: This invoice is stored in cloud storage and will remain accessible even if the server restarts.*`,
             },
           ],
         };

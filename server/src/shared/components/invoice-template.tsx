@@ -254,12 +254,36 @@ const InvoiceFooter = ({ invoice }: { invoice: Invoice }) => {
   );
 };
 
-// Generate invoice PDF
+// Generate invoice PDF to file
 export const generateInvoicePdf = async (
   invoice: Invoice,
   filePath: string
 ): Promise<void> => {
   await ReactPDF.render(<InvoiceTemplate invoice={invoice} />, filePath);
+};
+
+// Generate invoice PDF to buffer (for cloud storage)
+export const generateInvoicePdfBuffer = async (
+  invoice: Invoice
+): Promise<Buffer> => {
+  const stream = await ReactPDF.renderToStream(<InvoiceTemplate invoice={invoice} />);
+  
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    
+    stream.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    
+    stream.on('end', () => {
+      const buffer = Buffer.concat(chunks);
+      resolve(buffer);
+    });
+    
+    stream.on('error', (error: Error) => {
+      reject(error);
+    });
+  });
 };
 
 export default InvoiceTemplate;

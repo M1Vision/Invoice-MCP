@@ -9,18 +9,64 @@ startCommand:
   configSchema:
     type: object
     required:
-      - apiKey
+      - supabaseUrl
+      - supabaseKey
     properties:
-      apiKey:
+      # REQUIRED: Supabase Connection
+      supabaseUrl:
         type: string
-        description: API key for authentication
+        title: "Supabase Project URL"
+        description: "Your Supabase project URL (e.g., https://mohsljimdduthwjhygkp.supabase.co)"
+        pattern: "^https://.*\\.supabase\\.co$"
+      supabaseKey:
+        type: string
+        title: "Supabase Anon Key"
+        description: "Your Supabase anonymous/public API key for authentication"
+      
+      # OPTIONAL: Storage Configuration (defaults work for most cases)
+      storageBucket:
+        type: string
+        title: "Storage Bucket Name"
+        description: "Supabase storage bucket name for PDF files (default: invoices)"
+        default: "invoices"
+      
+      # OPTIONAL: Business Information (for invoice branding)
       businessName:
         type: string
-        description: Your business name
+        title: "Business Name"
+        description: "Your business name (appears on invoices)"
       businessEmail:
         type: string
-        description: Your business email
+        title: "Business Email"
+        description: "Your business email address"
+        format: "email"
+      businessPhone:
+        type: string
+        title: "Business Phone"
+        description: "Your business phone number"
+      businessAddress:
+        type: string
+        title: "Business Address"
+        description: "Your business address (appears on invoices)"
+      
+      # OPTIONAL: Advanced Settings (usually keep defaults)
+      autoCreateBucket:
+        type: boolean
+        title: "Auto-create Storage Bucket"
+        description: "Auto-create bucket if missing (set false if bucket exists)"
+        default: false
+      enableMetadataStorage:
+        type: boolean
+        title: "Enable Database Storage"
+        description: "Store invoice metadata in database (set false for URL-only)"
+        default: false
   exampleConfig:
-    apiKey: sk-example-key-123
-    businessName: My Business
-    businessEmail: contact@mybusiness.com
+    supabaseUrl: "https://mohsljimdduthwjhygkp.supabase.co"
+    supabaseKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+    storageBucket: "invoices"
+    businessName: "My Business Ltd"
+    businessEmail: "contact@mybusiness.com"
+    businessPhone: "+44 123 456 7890"
+    businessAddress: "123 Business St, London, UK"
+    autoCreateBucket: false
+    enableMetadataStorage: false

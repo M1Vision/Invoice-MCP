@@ -2,9 +2,9 @@
 
 ## 🚨 Important: How to Access Your Generated PDFs
 
-When you use the Invoice MCP through a web tool or LLM interface, the PDF files are generated on the server but need to be downloaded using specific URLs.
+When you use the Invoice MCP through a web tool or LLM interface, the PDF files are generated on the server and are immediately accessible through multiple endpoints with enhanced metadata tracking.
 
-## 📥 Download Process
+## 📥 Enhanced Download Process
 
 ### 1. **Generate Invoice**
 Use the `generate-invoice-pdf` tool as normal:
@@ -12,53 +12,123 @@ Use the `generate-invoice-pdf` tool as normal:
 Create an invoice for John Smith for web development work
 ```
 
-### 2. **Get Download URL**
-The tool will respond with a download URL like:
+### 2. **Get Enhanced Response**
+The tool now responds with comprehensive information:
 ```
-🔗 Download URL: /files/invoice-JS-15-01-2024.pdf
+✅ Invoice PDF Successfully Generated!
+
+📄 Invoice: INV-12345
+👤 Client: John Smith
+💰 Total: GBP 250.00
+📅 Created: 2024-01-15, 10:30:00
+
+🔗 Direct Download URL: /files/invoice-INV-12345.pdf
+
+Quick Access:
+• View all invoices: GET /files
+• Download this invoice: GET /files/invoice-INV-12345.pdf
+• Invoice metadata: GET /invoices/INV-12345
+
+For web access, use your server's full URL:
+https://your-server-domain.com/files/invoice-INV-12345.pdf
 ```
 
 ### 3. **Access Your PDF**
-Replace the domain with your actual Smithery deployment URL:
-```
-https://your-server.smithery.ai/files/invoice-JS-15-01-2024.pdf
-```
+Multiple ways to access your invoices:
+- **Direct download**: `https://your-server.com/files/invoice-INV-12345.pdf`
+- **Browse all invoices**: `https://your-server.com/invoices`
+- **Get metadata**: `https://your-server.com/invoices/INV-12345`
 
-## 🌐 Available Endpoints
+## 🌐 Enhanced API Endpoints
 
 ### File Download
 ```
 GET /files/{filename}
 ```
 - Downloads a specific PDF file
-- Example: `GET /files/invoice-JS-15-01-2024.pdf`
-- Response: PDF file download
+- Example: `GET /files/invoice-INV-12345.pdf`
+- Response: PDF file download with proper headers
 
-### List All Files
+### List All Files (Enhanced)
 ```
 GET /files
 ```
-- Lists all available PDF files
-- Returns JSON with download URLs
+- Lists all available PDF files with metadata
+- Returns JSON with download URLs and invoice information
 - Example response:
 ```json
 {
   "files": [
     {
-      "filename": "invoice-JS-15-01-2024.pdf",
-      "downloadUrl": "/files/invoice-JS-15-01-2024.pdf",
-      "fullUrl": "https://your-server.smithery.ai/files/invoice-JS-15-01-2024.pdf"
+      "filename": "invoice-INV-12345.pdf",
+      "invoiceNumber": "INV-12345",
+      "downloadUrl": "/files/invoice-INV-12345.pdf",
+      "fullUrl": "https://your-server.com/files/invoice-INV-12345.pdf",
+      "metadata": {
+        "invoiceNumber": "INV-12345",
+        "clientName": "John Smith",
+        "total": "250.00",
+        "currency": "GBP",
+        "createdAt": "2024-01-15T10:30:00.000Z",
+        "status": "generated"
+      }
     }
-  ]
+  ],
+  "total": 1,
+  "serverUrl": "https://your-server.com"
 }
 ```
 
-### Delete File (Optional)
+### Invoice Management (NEW!)
 ```
-DELETE /files/{filename}
+GET /invoices
 ```
-- Removes a specific PDF file from server
-- Example: `DELETE /files/invoice-JS-15-01-2024.pdf`
+- Lists all invoices with complete metadata
+- Includes full download URLs
+- Example response:
+```json
+{
+  "invoices": [
+    {
+      "invoiceNumber": "INV-12345",
+      "filename": "invoice-INV-12345.pdf",
+      "downloadUrl": "/files/invoice-INV-12345.pdf",
+      "fullDownloadUrl": "https://your-server.com/files/invoice-INV-12345.pdf",
+      "createdAt": "2024-01-15T10:30:00.000Z",
+      "total": "250.00",
+      "currency": "GBP",
+      "clientName": "John Smith",
+      "status": "generated"
+    }
+  ],
+  "total": 1,
+  "serverUrl": "https://your-server.com"
+}
+```
+
+### Get Specific Invoice
+```
+GET /invoices/{invoiceNumber}
+```
+- Gets metadata for a specific invoice
+- Example: `GET /invoices/INV-12345`
+- Returns complete invoice information with download URL
+
+### Update Invoice Status (NEW!)
+```
+PATCH /invoices/{invoiceNumber}/status
+```
+- Updates invoice status (generated, sent, paid)
+- Body: `{ "status": "sent" }`
+- Useful for tracking invoice lifecycle
+
+### Delete Invoice (NEW!)
+```
+DELETE /invoices/{invoiceNumber}
+```
+- Removes invoice PDF and metadata
+- Example: `DELETE /invoices/INV-12345`
+- Permanently deletes both file and tracking data
 
 ## 🔒 Security Features
 

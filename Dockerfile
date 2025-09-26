@@ -57,6 +57,6 @@ EXPOSE 8080
 # HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
 #   CMD curl -f http://localhost:${PORT:-8080}/health || exit 1
 
-# Start the Smithery-optimized HTTP server
-CMD ["node", "build/index-smithery.js"]
+# Start the robust Smithery server with Supabase integration
+CMD ["node", "build/index-smithery-robust.js"]
 

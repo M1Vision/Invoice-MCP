@@ -11,18 +11,21 @@
     "build"
   ],
   "scripts": {
-    "build": "tsc --project . && chmod +x build/index.js build/index-http.js build/index-smithery.js || true",
+    "build": "tsc --project . && chmod +x build/index.js build/index-http.js build/index-smithery.js build/index-smithery-robust.js || true",
     "build:http": "tsc --project . && chmod +x build/index-http.js || true",
     "build:smithery": "tsc --project . && chmod +x build/index-smithery.js || true",
+    "build:robust": "tsc --project . && chmod +x build/index-smithery-robust.js || true",
     "watch": "tsc --watch",
     "inspector": "npx @modelcontextprotocol/inspector build/index.js",
     "start:http": "node build/index-http.js",
-    "start:smithery": "node build/index-smithery.js"
+    "start:smithery": "node build/index-smithery.js",
+    "start:robust": "node build/index-smithery-robust.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",
     "@react-pdf/renderer": "^4.3.0",
     "@smithery/sdk": "^1.0.0",
+    "@supabase/supabase-js": "^2.57.4",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "zod": "^3.25.64"
