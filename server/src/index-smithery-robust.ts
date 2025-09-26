@@ -646,30 +646,74 @@ async function handleUpdateInvoiceStatus(args: any, supabaseManager: SupabaseMan
 // ===== SMITHERY HTTP SERVER =====
 // This handles the HTTP transport for Smithery deployment
 function parseConfig(req: express.Request): Config {
-  const rawConfig: any = {};
+  let rawConfig: any = {};
   
-  // Parse dot-notation query parameters from Smithery
-  for (const [key, value] of Object.entries(req.query)) {
-    if (typeof value === 'string') {
-      const keys = key.split('.');
-      let current = rawConfig;
-      
-      for (let i = 0; i < keys.length - 1; i++) {
-        if (!(keys[i] in current)) {
-          current[keys[i]] = {};
-        }
-        current = current[keys[i]];
-      }
-      
-      current[keys[keys.length - 1]] = value;
+  // Method 1: Parse base64-encoded config parameter (Smithery standard)
+  const configParam = req.query.config as string;
+  if (configParam) {
+    try {
+      const decodedConfig = Buffer.from(configParam, 'base64').toString();
+      rawConfig = JSON.parse(decodedConfig);
+      console.log('Parsed config from base64 parameter:', rawConfig);
+    } catch (error) {
+      console.warn('Failed to parse base64 config parameter:', error);
     }
   }
+  
+  // Method 2: Parse dot-notation query parameters (fallback)
+  if (Object.keys(rawConfig).length === 0) {
+    for (const [key, value] of Object.entries(req.query)) {
+      if (typeof value === 'string' && key !== 'config') {
+        const keys = key.split('.');
+        let current = rawConfig;
+        
+        for (let i = 0; i < keys.length - 1; i++) {
+          if (!(keys[i] in current)) {
+            current[keys[i]] = {};
+          }
+          current = current[keys[i]];
+        }
+        
+        current[keys[keys.length - 1]] = value;
+      }
+    }
+    if (Object.keys(rawConfig).length > 0) {
+      console.log('Parsed config from dot-notation query parameters:', rawConfig);
+    }
+  }
+
+  // Method 3: Environment variables (fallback for local testing)
+  if (Object.keys(rawConfig).length === 0) {
+    rawConfig.supabaseUrl = process.env.SUPABASE_URL || process.env.supabaseUrl;
+    rawConfig.supabaseKey = process.env.SUPABASE_KEY || process.env.supabaseKey;
+    rawConfig.storageBucket = process.env.STORAGE_BUCKET || process.env.storageBucket || 'invoices';
+    rawConfig.businessName = process.env.BUSINESS_NAME || process.env.businessName;
+    rawConfig.businessEmail = process.env.BUSINESS_EMAIL || process.env.businessEmail;
+    rawConfig.businessPhone = process.env.BUSINESS_PHONE || process.env.businessPhone;
+    rawConfig.businessAddress = process.env.BUSINESS_ADDRESS || process.env.businessAddress;
+    rawConfig.autoCreateBucket = process.env.AUTO_CREATE_BUCKET === 'true' || process.env.autoCreateBucket === 'true' || false;
+    rawConfig.enableMetadataStorage = process.env.ENABLE_METADATA_STORAGE === 'true' || process.env.enableMetadataStorage === 'true' || false;
+    
+    // Only log if we found environment variables
+    if (rawConfig.supabaseUrl || rawConfig.supabaseKey) {
+      console.log('Using environment variables for configuration');
+    }
+  }
+
+  console.log('Final raw config before validation:', rawConfig);
 
   // Validate and parse configuration
   try {
     return configSchema.parse(rawConfig);
   } catch (error) {
     console.error('Configuration validation failed:', error);
+    console.error('Query parameters available:', Object.keys(req.query));
+    console.error('Environment variables status:', {
+      SUPABASE_URL: process.env.SUPABASE_URL ? '***set***' : 'undefined',
+      SUPABASE_KEY: process.env.SUPABASE_KEY ? '***set***' : 'undefined',
+      supabaseUrl: process.env.supabaseUrl ? '***set***' : 'undefined',
+      supabaseKey: process.env.supabaseKey ? '***set***' : 'undefined'
+    });
     throw new Error(`Invalid configuration: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
