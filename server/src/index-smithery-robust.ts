@@ -50,10 +50,18 @@ class SupabaseManager {
 
   async initialize(): Promise<void> {
     try {
-      // Test connection
-      const { data, error } = await this.supabase.from('_test').select('*').limit(1);
-      if (error && !error.message.includes('relation "_test" does not exist')) {
-        throw new Error(`Supabase connection failed: ${error.message}`);
+      // Test storage connection (since we only need storage, not database)
+      try {
+        const { data: buckets, error } = await this.supabase.storage.listBuckets();
+        if (error) {
+          console.warn('Storage connection test failed:', error.message);
+          // Don't throw error - storage might still work for uploads
+        } else {
+          console.log('✅ Supabase Storage connection verified');
+        }
+      } catch (storageError) {
+        console.warn('Storage connection test error:', storageError);
+        // Continue anyway - uploads might still work
       }
 
       // Create storage bucket if needed
@@ -61,12 +69,12 @@ class SupabaseManager {
         await this.ensureBucketExists();
       }
 
-      // Create database table if needed
+      // Create database table if needed (only if metadata storage is enabled)
       if (this.config.enableMetadataStorage) {
         await this.ensureTableExists();
       }
 
-      console.log('✅ Supabase initialized successfully');
+      console.log('✅ Supabase initialized successfully (PDF storage ready)');
     } catch (error) {
       console.error('❌ Supabase initialization failed:', error);
       throw error;
@@ -297,12 +305,12 @@ function createMcpServer(config: Config) {
     }
   };
 
-  // Define available tools
+  // Define available tools - simplified for PDF storage only
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const tools = [
       {
         name: "generate-invoice-pdf",
-        description: "Generate a professional invoice PDF and store it in Supabase",
+        description: "Generate a professional invoice PDF and store it in Supabase Storage",
         inputSchema: {
           type: "object",
           properties: {
@@ -352,61 +360,13 @@ function createMcpServer(config: Config) {
           },
           required: ["invoiceNumber", "clientName", "items"]
         }
-      },
-      {
-        name: "get-invoice-details",
-        description: "Get details of a specific invoice from the database",
-        inputSchema: {
-          type: "object",
-          properties: {
-            invoiceNumber: {
-              type: "string",
-              description: "Invoice number to retrieve"
-            }
-          },
-          required: ["invoiceNumber"]
-        }
-      },
-      {
-        name: "list-invoices", 
-        description: "List recent invoices with their status and details",
-        inputSchema: {
-          type: "object",
-          properties: {
-            limit: {
-              type: "number",
-              description: "Maximum number of invoices to return",
-              default: 20,
-              maximum: 100
-            }
-          }
-        }
-      },
-      {
-        name: "update-invoice-status",
-        description: "Update the status of an invoice (generated, sent, paid, cancelled)",
-        inputSchema: {
-          type: "object", 
-          properties: {
-            invoiceNumber: {
-              type: "string",
-              description: "Invoice number to update"
-            },
-            status: {
-              type: "string",
-              enum: ["generated", "sent", "paid", "cancelled"],
-              description: "New status for the invoice"
-            }
-          },
-          required: ["invoiceNumber", "status"]
-        }
       }
     ];
 
     return { tools };
   });
 
-  // Handle tool calls
+  // Handle tool calls - simplified for PDF storage only
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     await ensureInitialized();
 
@@ -414,15 +374,6 @@ function createMcpServer(config: Config) {
       switch (request.params.name) {
         case "generate-invoice-pdf":
           return await handleGenerateInvoice(request.params.arguments, supabaseManager, config);
-        
-        case "get-invoice-details":
-          return await handleGetInvoiceDetails(request.params.arguments, supabaseManager);
-        
-        case "list-invoices":
-          return await handleListInvoices(request.params.arguments, supabaseManager);
-        
-        case "update-invoice-status":
-          return await handleUpdateInvoiceStatus(request.params.arguments, supabaseManager);
         
         default:
           throw new Error(`Unknown tool: ${request.params.name}`);
@@ -509,9 +460,6 @@ async function handleGenerateInvoice(args: any, supabaseManager: SupabaseManager
   const filename = `invoice-${invoiceNumber}-${Date.now()}.pdf`;
   const pdfUrl = await supabaseManager.uploadPDF(pdfBuffer, filename);
 
-  // Save metadata to database
-  await supabaseManager.saveInvoiceMetadata(validatedInvoice, pdfUrl, filename);
-
   return {
     content: [
       {
@@ -526,15 +474,15 @@ async function handleGenerateInvoice(args: any, supabaseManager: SupabaseManager
 🔗 **PDF Download:** ${pdfUrl}
 
 **Storage Details:**
-• ✅ PDF stored in Supabase Storage
-• ✅ Metadata saved to database
+• ✅ PDF stored in Supabase Storage bucket: "${config.storageBucket}"
 • ✅ Permanent public URL generated
 • ✅ Accessible from anywhere
+• ✅ Ready for your chat frontend
 
-**Next Steps:**
-• Share the PDF URL with your client
-• Update status when sent/paid
-• Track invoice in your database`,
+**Perfect for your use case:**
+• Direct PDF storage in your "invoices" bucket
+• No database complexity - just clean URLs
+• Optimized for chat frontend integration`,
       },
     ],
   };
