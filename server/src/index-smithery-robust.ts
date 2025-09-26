@@ -64,10 +64,8 @@ class SupabaseManager {
         // Continue anyway - uploads might still work
       }
 
-      // Create storage bucket if needed
-      if (this.config.autoCreateBucket) {
-        await this.ensureBucketExists();
-      }
+      // Always check and ensure storage bucket exists
+      await this.ensureBucketExists();
 
       // Create database table if needed (only if metadata storage is enabled)
       if (this.config.enableMetadataStorage) {
@@ -83,33 +81,43 @@ class SupabaseManager {
 
   private async ensureBucketExists(): Promise<void> {
     try {
+      console.log(`🔍 Checking if bucket '${this.config.storageBucket}' exists...`);
+      
       const { data: buckets, error } = await this.supabase.storage.listBuckets();
       
       if (error) {
         console.warn('Could not list buckets:', error.message);
-        return;
+        console.log('⚠️  Will attempt to create bucket anyway...');
+      } else {
+        console.log('📋 Available buckets:', buckets?.map(b => b.name) || 'none');
       }
 
       const bucketExists = buckets?.some((bucket: any) => bucket.name === this.config.storageBucket);
       
-      if (!bucketExists) {
-        const { error: createError } = await this.supabase.storage.createBucket(
-          this.config.storageBucket,
-          {
-            public: true,
-            allowedMimeTypes: ['application/pdf'],
-            fileSizeLimit: 50 * 1024 * 1024, // 50MB
-          }
-        );
+      if (bucketExists) {
+        console.log(`✅ Bucket '${this.config.storageBucket}' already exists`);
+        return;
+      }
 
-        if (createError) {
-          console.warn(`Could not create bucket: ${createError.message}`);
-        } else {
-          console.log(`✅ Created storage bucket: ${this.config.storageBucket}`);
+      console.log(`📦 Creating bucket '${this.config.storageBucket}'...`);
+      const { error: createError } = await this.supabase.storage.createBucket(
+        this.config.storageBucket,
+        {
+          public: true,
+          allowedMimeTypes: ['application/pdf'],
+          fileSizeLimit: 50 * 1024 * 1024, // 50MB
         }
+      );
+
+      if (createError) {
+        console.error(`❌ Could not create bucket: ${createError.message}`);
+        throw new Error(`Failed to create storage bucket '${this.config.storageBucket}': ${createError.message}`);
+      } else {
+        console.log(`✅ Successfully created storage bucket: ${this.config.storageBucket}`);
       }
     } catch (error) {
-      console.warn('Error ensuring bucket exists:', error);
+      console.error('❌ Error ensuring bucket exists:', error);
+      throw error;
     }
   }
 
