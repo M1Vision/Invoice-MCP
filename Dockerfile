@@ -31,13 +31,15 @@ RUN cd server && npm run build
 # Copy built files to root build directory
 RUN mkdir -p build && cp -r server/build/* build/
 
-# Remove dev dependencies after build to reduce image size
-RUN npm prune --omit=dev
-# Don't prune server dependencies as they're needed at runtime
-# RUN cd server && npm prune --omit=dev
+# Copy server node_modules to root for runtime access
+RUN cp -r server/node_modules ./
 
-# Set NODE_PATH to include server node_modules
-ENV NODE_PATH=/app/server/node_modules:/app/node_modules
+# Remove dev dependencies after build to reduce image size (but keep production dependencies)
+RUN npm prune --omit=dev
+RUN cd server && npm prune --omit=dev
+
+# Set NODE_PATH to include both locations
+ENV NODE_PATH=/app/node_modules:/app/server/node_modules
 
 # Create temp directory for invoice files
 RUN mkdir -p temp
