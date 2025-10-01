@@ -9,7 +9,7 @@ import {
 import express from "express";
 import cors from "cors";
 import { randomUUID } from "node:crypto";
-import { Invoice, InvoiceItem, InvoiceSchema } from "./shared/types/invoice.js";
+import { Invoice, InvoiceSchema } from "./shared/types/invoice.js";
 import { generateInvoicePdfBuffer } from "./shared/components/invoice-template.js";
 import { z } from "zod";
 import { createClient } from '@supabase/supabase-js';
@@ -24,16 +24,12 @@ export const configSchema = z.object({
   
   // OPTIONAL: Storage settings (defaults work for most cases)
   storageBucket: z.string().default("invoices").describe("Supabase storage bucket name for PDFs (default: invoices)"),
-  
+
   // OPTIONAL: Business information (for invoice branding)
   businessName: z.string().optional().describe("Your business name (appears on invoices)"),
   businessEmail: z.string().optional().describe("Your business email"),
   businessPhone: z.string().optional().describe("Your business phone"),
   businessAddress: z.string().optional().describe("Your business address"),
-  
-  // OPTIONAL: Advanced settings (usually keep defaults)
-  autoCreateBucket: z.boolean().default(false).describe("Auto-create bucket if missing (set false if bucket exists)"),
-  enableMetadataStorage: z.boolean().default(false).describe("Store invoice metadata in database (set false for URL-only)"),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -67,11 +63,6 @@ class SupabaseManager {
       // Always check and ensure storage bucket exists
       await this.ensureBucketExists();
 
-      // Create database table if needed (only if metadata storage is enabled)
-      if (this.config.enableMetadataStorage) {
-        await this.ensureTableExists();
-      }
-
       console.log('✅ Supabase initialized successfully (PDF storage ready)');
     } catch (error) {
       console.error('❌ Supabase initialization failed:', error);
@@ -89,10 +80,10 @@ class SupabaseManager {
         console.warn('Could not list buckets:', error.message);
         console.log('⚠️  Will attempt to create bucket anyway...');
       } else {
-        console.log('📋 Available buckets:', buckets?.map(b => b.name) || 'none');
+        console.log('📋 Available buckets:', buckets?.map((bucket: { name: string }) => bucket.name) || 'none');
       }
 
-      const bucketExists = buckets?.some((bucket: any) => bucket.name === this.config.storageBucket);
+      const bucketExists = buckets?.some((bucket: { name: string }) => bucket.name === this.config.storageBucket);
       
       if (bucketExists) {
         console.log(`✅ Bucket '${this.config.storageBucket}' already exists`);
@@ -121,54 +112,6 @@ class SupabaseManager {
     }
   }
 
-  private async ensureTableExists(): Promise<void> {
-    try {
-      // Try to create the invoices table
-      const { error } = await this.supabase.rpc('create_invoices_table_if_not_exists');
-      
-      // If the RPC doesn't exist, create it via SQL
-      if (error && error.message.includes('function create_invoices_table_if_not_exists() does not exist')) {
-        await this.createInvoiceTableDirectly();
-      }
-    } catch (error) {
-      console.warn('Error ensuring table exists:', error);
-    }
-  }
-
-  private async createInvoiceTableDirectly(): Promise<void> {
-    const createTableSQL = `
-      CREATE TABLE IF NOT EXISTS ${this.config.databaseTable} (
-        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-        invoice_number TEXT UNIQUE NOT NULL,
-        client_name TEXT NOT NULL,
-        client_email TEXT,
-        total_amount DECIMAL(10,2) NOT NULL,
-        currency TEXT DEFAULT 'GBP',
-        status TEXT DEFAULT 'generated' CHECK (status IN ('generated', 'sent', 'paid', 'cancelled')),
-        pdf_url TEXT,
-        pdf_filename TEXT,
-        metadata JSONB,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_invoices_invoice_number ON ${this.config.databaseTable}(invoice_number);
-      CREATE INDEX IF NOT EXISTS idx_invoices_status ON ${this.config.databaseTable}(status);
-      CREATE INDEX IF NOT EXISTS idx_invoices_created_at ON ${this.config.databaseTable}(created_at);
-    `;
-
-    try {
-      const { error } = await this.supabase.rpc('exec_sql', { sql: createTableSQL });
-      if (error) {
-        console.warn('Could not create table via RPC:', error.message);
-      } else {
-        console.log(`✅ Created database table: ${this.config.databaseTable}`);
-      }
-    } catch (error) {
-      console.warn('Error creating table:', error);
-    }
-  }
-
   async uploadPDF(buffer: Buffer, filename: string): Promise<string> {
     const { data, error } = await this.supabase.storage
       .from(this.config.storageBucket)
@@ -190,100 +133,6 @@ class SupabaseManager {
     return publicUrlData.publicUrl;
   }
 
-  async saveInvoiceMetadata(invoice: any, pdfUrl: string, filename: string): Promise<void> {
-    if (!this.config.enableMetadataStorage) return;
-
-    const invoiceRecord = {
-      invoice_number: invoice.invoiceNumber,
-      client_name: invoice.customer.name,
-      client_email: invoice.customer.email,
-      total_amount: invoice.total,
-      currency: invoice.currency,
-      status: 'generated',
-      pdf_url: pdfUrl,
-      pdf_filename: filename,
-      metadata: {
-        items: invoice.items,
-        subtotal: invoice.subtotal,
-        vatAmount: invoice.vatAmount,
-        vatRate: invoice.vatRate,
-        date: invoice.date,
-        dueDate: invoice.dueDate,
-        business: this.config.businessName ? {
-          name: this.config.businessName,
-          email: this.config.businessEmail,
-          phone: this.config.businessPhone,
-          address: this.config.businessAddress,
-        } : invoice.business,
-        notes: invoice.notes,
-        terms: invoice.terms,
-      }
-    };
-
-    const { error } = await this.supabase
-      .from(this.config.databaseTable)
-      .upsert(invoiceRecord, { 
-        onConflict: 'invoice_number',
-        ignoreDuplicates: false 
-      });
-
-    if (error) {
-      console.warn('Could not save invoice metadata:', error.message);
-    }
-  }
-
-  async getInvoiceMetadata(invoiceNumber: string): Promise<any> {
-    if (!this.config.enableMetadataStorage) return null;
-
-    const { data, error } = await this.supabase
-      .from(this.config.databaseTable)
-      .select('*')
-      .eq('invoice_number', invoiceNumber)
-      .single();
-
-    if (error) {
-      console.warn('Could not fetch invoice metadata:', error.message);
-      return null;
-    }
-
-    return data;
-  }
-
-  async listInvoices(limit: number = 50): Promise<any[]> {
-    if (!this.config.enableMetadataStorage) return [];
-
-    const { data, error } = await this.supabase
-      .from(this.config.databaseTable)
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(limit);
-
-    if (error) {
-      console.warn('Could not list invoices:', error.message);
-      return [];
-    }
-
-    return data || [];
-  }
-
-  async updateInvoiceStatus(invoiceNumber: string, status: string): Promise<boolean> {
-    if (!this.config.enableMetadataStorage) return false;
-
-    const { error } = await this.supabase
-      .from(this.config.databaseTable)
-      .update({ 
-        status, 
-        updated_at: new Date().toISOString() 
-      })
-      .eq('invoice_number', invoiceNumber);
-
-    if (error) {
-      console.warn('Could not update invoice status:', error.message);
-      return false;
-    }
-
-    return true;
-  }
 }
 
 // ===== MCP SERVER FACTORY =====
@@ -496,109 +345,6 @@ async function handleGenerateInvoice(args: any, supabaseManager: SupabaseManager
   };
 }
 
-async function handleGetInvoiceDetails(args: any, supabaseManager: SupabaseManager) {
-  const { invoiceNumber } = args;
-  
-  const invoice = await supabaseManager.getInvoiceMetadata(invoiceNumber);
-  
-  if (!invoice) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: `❌ Invoice ${invoiceNumber} not found in database.`,
-        },
-      ],
-    };
-  }
-
-  return {
-    content: [
-      {
-        type: "text", 
-        text: `📄 **Invoice Details: ${invoice.invoice_number}**
-
-👤 **Client:** ${invoice.client_name}
-📧 **Email:** ${invoice.client_email || 'Not provided'}
-💰 **Amount:** ${invoice.currency} ${invoice.total_amount}
-📊 **Status:** ${invoice.status}
-📅 **Created:** ${new Date(invoice.created_at).toLocaleString()}
-📅 **Updated:** ${new Date(invoice.updated_at).toLocaleString()}
-
-🔗 **PDF URL:** ${invoice.pdf_url}
-
-**Line Items:** ${invoice.metadata?.items?.length || 0} items
-**Subtotal:** ${invoice.currency} ${invoice.metadata?.subtotal?.toFixed(2) || '0.00'}
-**VAT:** ${invoice.currency} ${invoice.metadata?.vatAmount?.toFixed(2) || '0.00'}
-
-${invoice.metadata?.notes ? `**Notes:** ${invoice.metadata.notes}` : ''}`,
-      },
-    ],
-  };
-}
-
-async function handleListInvoices(args: any, supabaseManager: SupabaseManager) {
-  const { limit = 20 } = args;
-  
-  const invoices = await supabaseManager.listInvoices(limit);
-  
-  if (invoices.length === 0) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: "📋 No invoices found in the database.",
-        },
-      ],
-    };
-  }
-
-  const invoiceList = invoices
-    .map((inv, index) => 
-      `${index + 1}. **${inv.invoice_number}** - ${inv.client_name} - ${inv.currency} ${inv.total_amount} - ${inv.status} (${new Date(inv.created_at).toLocaleDateString()})`
-    )
-    .join('\n');
-
-  return {
-    content: [
-      {
-        type: "text",
-        text: `📋 **Recent Invoices** (${invoices.length} found)
-
-${invoiceList}
-
-Use \`get-invoice-details\` to view full details of any invoice.`,
-      },
-    ],
-  };
-}
-
-async function handleUpdateInvoiceStatus(args: any, supabaseManager: SupabaseManager) {
-  const { invoiceNumber, status } = args;
-  
-  const success = await supabaseManager.updateInvoiceStatus(invoiceNumber, status);
-  
-  if (!success) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: `❌ Could not update status for invoice ${invoiceNumber}. Invoice may not exist.`,
-        },
-      ],
-    };
-  }
-
-  return {
-    content: [
-      {
-        type: "text",
-        text: `✅ Invoice ${invoiceNumber} status updated to: **${status}**`,
-      },
-    ],
-  };
-}
-
 // ===== SMITHERY HTTP SERVER =====
 // This handles the HTTP transport for Smithery deployment
 function parseConfig(req: express.Request): Config {
@@ -647,8 +393,6 @@ function parseConfig(req: express.Request): Config {
     rawConfig.businessEmail = process.env.BUSINESS_EMAIL || process.env.businessEmail;
     rawConfig.businessPhone = process.env.BUSINESS_PHONE || process.env.businessPhone;
     rawConfig.businessAddress = process.env.BUSINESS_ADDRESS || process.env.businessAddress;
-    rawConfig.autoCreateBucket = process.env.AUTO_CREATE_BUCKET === 'true' || process.env.autoCreateBucket === 'true' || false;
-    rawConfig.enableMetadataStorage = process.env.ENABLE_METADATA_STORAGE === 'true' || process.env.enableMetadataStorage === 'true' || false;
     
     // Only log if we found environment variables
     if (rawConfig.supabaseUrl || rawConfig.supabaseKey) {
