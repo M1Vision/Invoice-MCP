@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { Invoice, InvoiceSchema } from "./shared/types/invoice.js";
 import { generateInvoicePdfBuffer } from "./shared/components/invoice-template.js";
 import { z } from "zod";
-import { createClient } from '@supabase/supabase-js';
+import { SupabaseClient, createClient } from '@supabase/supabase-js';
 
 // ===== CONFIGURATION SCHEMA =====
 // This schema defines what configuration parameters users can provide
@@ -25,6 +25,7 @@ export const configSchema = z.object({
   // OPTIONAL: Storage settings (defaults work for most cases)
   storageBucket: z.string().default("invoices").describe("Supabase storage bucket name for PDFs (default: invoices)"),
   autoCreateBucket: z
+    .coerce
     .boolean()
     .default(false)
     .describe(
@@ -39,6 +40,7 @@ export const configSchema = z.object({
 
   // OPTIONAL: Legacy field preserved for backwards compatibility. Metadata storage is currently disabled.
   enableMetadataStorage: z
+    .coerce
     .boolean()
     .default(false)
     .describe(
@@ -50,7 +52,7 @@ export type Config = z.infer<typeof configSchema>;
 
 // ===== SUPABASE CLIENT MANAGEMENT =====
 class SupabaseManager {
-  private supabase: any;
+  private supabase: SupabaseClient;
   private config: Config;
 
   constructor(config: Config) {
@@ -129,7 +131,7 @@ class SupabaseManager {
 
       const { error } = await this.supabase.storage
         .from(this.config.storageBucket)
-        .list({ limit: 1, offset: 0 });
+        .list('', { limit: 1, offset: 0 });
 
       if (error) {
         if (error.message?.toLowerCase().includes('not found')) {
