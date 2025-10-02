@@ -104,10 +104,12 @@ class SupabaseManager {
       if (error) {
         console.warn('Could not list buckets:', error.message);
         console.log('⚠️  Will attempt to create bucket anyway...');
+      } else {
+        console.log('📋 Available buckets:', buckets?.map((bucket: { name: string }) => bucket.name) || 'none');
       }
 
       const bucketExists = buckets?.some((bucket: { name: string }) => bucket.name === this.config.storageBucket);
-
+      
       if (bucketExists) {
         console.log(`✅ Bucket '${this.config.storageBucket}' already exists`);
         return;
