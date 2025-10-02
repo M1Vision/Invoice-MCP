@@ -29,7 +29,12 @@ startCommand:
         title: "Storage Bucket Name"
         description: "Supabase storage bucket name for PDF files (default: invoices)"
         default: "invoices"
-      
+      autoCreateBucket:
+        type: boolean
+        title: "Auto-create Storage Bucket"
+        description: "Requires a Supabase service role key. Disable when using an anon key (default: false)."
+        default: false
+
       # OPTIONAL: Business Information (for invoice branding)
       businessName:
         type: string
@@ -48,25 +53,19 @@ startCommand:
         type: string
         title: "Business Address"
         description: "Your business address (appears on invoices)"
-      
-      # OPTIONAL: Advanced Settings (usually keep defaults)
-      autoCreateBucket:
-        type: boolean
-        title: "Auto-create Storage Bucket"
-        description: "Auto-create bucket if missing (set false if bucket exists)"
-        default: false
+
       enableMetadataStorage:
         type: boolean
-        title: "Enable Database Storage"
-        description: "Store invoice metadata in database (set false for URL-only)"
+        title: "(Deprecated) Database Storage"
+        description: "Kept for backwards compatibility. Metadata storage is currently disabled and this flag is ignored."
         default: false
   exampleConfig:
     supabaseUrl: "https://mohsljimdduthwjhygkp.supabase.co"
     supabaseKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
     storageBucket: "invoices"
+    autoCreateBucket: false
     businessName: "My Business Ltd"
     businessEmail: "contact@mybusiness.com"
     businessPhone: "+44 123 456 7890"
     businessAddress: "123 Business St, London, UK"
-    autoCreateBucket: false
     enableMetadataStorage: false

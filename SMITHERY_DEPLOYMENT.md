@@ -12,23 +12,20 @@ Your original issue was that **invoices weren't accessible** because:
 I've implemented a **cloud storage solution** that makes invoices permanently accessible via public URLs:
 
 ### **Key Features:**
-- 📄 **PDFs stored in cloud storage** (Supabase, AWS S3, or custom)
+- 📄 **PDFs stored in Supabase Storage**
 - 🔗 **Direct download URLs** provided immediately
-- 💾 **Metadata tracking** for invoice management
 - 🌍 **Global accessibility** - works from anywhere
 - 🔄 **Persistent storage** - survives server restarts
 
 ## 🏗️ **Architecture**
 
 ```
-User Request → MCP Server → Generate PDF Buffer → Upload to Cloud → Return Public URL
-                ↓
-         Save Metadata → Cloud Storage → Accessible Forever
+User Request → MCP Server → Generate PDF Buffer → Upload to Supabase → Return Public URL
 ```
 
 ## 📋 **Setup Instructions**
 
-### **Option 1: Supabase Storage (Recommended)**
+### **Supabase Storage Setup (Recommended)**
 
 1. **Create Supabase Project:**
    ```bash
@@ -41,47 +38,21 @@ User Request → MCP Server → Generate PDF Buffer → Upload to Cloud → Retu
    ```sql
    -- In Supabase SQL Editor
    INSERT INTO storage.buckets (id, name, public)
-   VALUES ('invoices', 'invoices', true);
+   VALUES ('invoices', 'invoices', true)
+   ON CONFLICT (id) DO UPDATE SET public = true;
    ```
+
+   > 💡 You can also create the bucket through the Supabase dashboard UI—just ensure it's marked as public so the generated URLs are accessible.
 
 3. **Configure Smithery:**
    ```yaml
    # Your smithery.yaml is already configured!
    # Just provide these values when deploying:
-   cloudStorageProvider: supabase
    supabaseUrl: https://your-project.supabase.co
    supabaseKey: your-supabase-anon-key
    supabaseBucket: invoices
+   autoCreateBucket: false # switch to true only if you deploy with a service role key
    ```
-
-### **Option 2: AWS S3 Storage**
-
-1. **Create S3 Bucket:**
-   ```bash
-   aws s3 mb s3://your-invoice-bucket
-   aws s3api put-bucket-policy --bucket your-invoice-bucket --policy '{
-     "Version": "2012-10-17",
-     "Statement": [{
-       "Effect": "Allow",
-       "Principal": "*",
-       "Action": "s3:GetObject",
-       "Resource": "arn:aws:s3:::your-invoice-bucket/*"
-     }]
-   }'
-   ```
-
-2. **Configure Smithery:**
-   ```yaml
-   cloudStorageProvider: s3
-   awsS3Bucket: your-invoice-bucket
-   awsRegion: us-east-1
-   awsAccessKeyId: your-access-key
-   awsSecretAccessKey: your-secret-key
-   ```
-
-### **Option 3: Custom Storage**
-
-For any other cloud provider, modify the `SimpleCloudStorage` class in `cloud-storage.ts`.
 
 ## 🚀 **Deployment Steps**
 
@@ -114,9 +85,9 @@ Generate Invoice → Save to temp/ → ❌ Not accessible
 
 ### **After (Cloud Solution):**
 ```
-Generate Invoice → Upload to Cloud → ✅ Get permanent URL
+Generate Invoice → Upload to Supabase → ✅ Get permanent URL
                       ↓
-               https://storage.com/invoice-123.pdf
+        https://<project>.supabase.co/storage/v1/object/public/invoices/invoice-123.pdf
 ```
 
 ### **Example Response:**
@@ -130,7 +101,7 @@ Generate Invoice → Upload to Cloud → ✅ Get permanent URL
 
 🔗 Download URL: https://your-storage.supabase.co/storage/v1/object/public/invoices/invoice-INV-12345.pdf
 
-Cloud Storage Features:
+Supabase Storage Features:
 • ✅ Permanently accessible via URL
 • ✅ No server dependency
 • ✅ Automatic backup & redundancy
@@ -146,26 +117,7 @@ Access Methods:
 
 ## 🔧 **Configuration Options**
 
-The `smithery.yaml` now supports multiple cloud storage providers:
-
-```yaml
-configSchema:
-  properties:
-    cloudStorageProvider:
-      enum: ["supabase", "s3", "simple"]
-      description: "Choose your cloud storage provider"
-    
-    # Supabase options
-    supabaseUrl: "https://your-project.supabase.co"
-    supabaseKey: "your-anon-key"
-    supabaseBucket: "invoices"
-    
-    # AWS S3 options  
-    awsS3Bucket: "your-bucket"
-    awsRegion: "us-east-1"
-    awsAccessKeyId: "your-key"
-    awsSecretAccessKey: "your-secret"
-```
+The Smithery configuration focuses on Supabase storage credentials and branding options. Auto-creating buckets requires deploying with a Supabase service role key; otherwise, create the bucket ahead of time and keep `autoCreateBucket` disabled.
 
 ## 📊 **Benefits**
 
@@ -206,11 +158,10 @@ configSchema:
 
 ## 🎉 **Next Steps**
 
-1. **Choose your cloud storage provider**
-2. **Set up storage bucket/container**
-3. **Deploy to Smithery with credentials**
-4. **Test invoice generation**
-5. **Share URLs with clients!**
+1. **Set up your Supabase project & public bucket**
+2. **Deploy to Smithery with Supabase credentials**
+3. **Test invoice generation**
+4. **Share URLs with clients!**
 
 ---
 
@@ -220,7 +171,7 @@ Your invoices are now **permanently accessible** via cloud storage URLs! No more
 
 The solution works with:
 - ✅ **Smithery deployment** (containerized)
-- ✅ **Any cloud storage** (Supabase, S3, etc.)
+- ✅ **Supabase Storage buckets** for persistent file hosting
 - ✅ **Global accessibility** (CDN distributed)
 - ✅ **Permanent URLs** (survive restarts)
 
