@@ -67,6 +67,21 @@ class SupabaseManager {
 
   async initialize(): Promise<void> {
     try {
+      // Test storage connection (non-fatal) so users get early feedback about credentials
+      try {
+        const { data: buckets, error } = await this.supabase.storage.listBuckets();
+        if (error) {
+          console.warn('Storage connection test failed:', error.message);
+          // Don't throw error - storage might still work for uploads
+        } else {
+          console.log('✅ Supabase Storage connection verified');
+          console.log('📋 Available buckets:', buckets?.map((bucket: { name: string }) => bucket.name) || 'none');
+        }
+      } catch (storageError) {
+        console.warn('Storage connection test error:', storageError);
+        // Continue anyway - uploads might still work
+      }
+
       if (this.config.autoCreateBucket) {
         await this.ensureBucketExists();
       } else {
@@ -89,8 +104,6 @@ class SupabaseManager {
       if (error) {
         console.warn('Could not list buckets:', error.message);
         console.log('⚠️  Will attempt to create bucket anyway...');
-      } else {
-        console.log('📋 Available buckets:', buckets?.map((bucket: { name: string }) => bucket.name) || 'none');
       }
 
       const bucketExists = buckets?.some((bucket: { name: string }) => bucket.name === this.config.storageBucket);
