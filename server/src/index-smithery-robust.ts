@@ -489,7 +489,15 @@ function parseConfig(req: express.Request): Config {
   }
 
   // Method 3: Environment variables (fallback for local testing and Smithery scanning)
-  if (Object.keys(rawConfig).length === 0 || rawConfig.supabaseUrl === 'string' || rawConfig.supabaseKey === 'string') {
+  // Also use env vars if we detected placeholder values like 'string'
+  const hasPlaceholders = 
+    rawConfig.supabaseUrl === 'string' || 
+    rawConfig.supabaseKey === 'string' ||
+    !rawConfig.supabaseUrl ||
+    !rawConfig.supabaseKey;
+    
+  if (Object.keys(rawConfig).length === 0 || hasPlaceholders) {
+    console.log('🔄 Falling back to environment variables (placeholder or missing config detected)');
     const envConfig: any = {};
     envConfig.supabaseUrl =
       process.env.SUPABASE_URL || process.env.supabaseUrl || process.env.SUPABASE_PROJECT_URL;
@@ -509,7 +517,13 @@ function parseConfig(req: express.Request): Config {
     if (envConfig.supabaseUrl && envConfig.supabaseKey) {
       rawConfig = envConfig;
       configSource = 'environment-variables';
-      console.log('Using environment variables for configuration');
+      console.log('✅ Using environment variables for configuration');
+      console.log('   SUPABASE_URL:', envConfig.supabaseUrl);
+      console.log('   STORAGE_BUCKET:', envConfig.storageBucket);
+    } else {
+      console.error('❌ Environment variables not set properly!');
+      console.error('   SUPABASE_URL:', process.env.SUPABASE_URL ? 'set' : 'missing');
+      console.error('   SUPABASE_KEY:', process.env.SUPABASE_KEY ? 'set' : 'missing');
     }
   }
 

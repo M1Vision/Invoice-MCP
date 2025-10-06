@@ -69,3 +69,10 @@ startCommand:
     businessPhone: "+44 123 456 7890"
     businessAddress: "123 Business St, London, UK"
     enableMetadataStorage: false
+
+# Environment variables for Smithery scanning (used when no test profile configured)
+env:
+  SUPABASE_URL: "https://mohsljimdduthwjhygkp.supabase.co"
+  SUPABASE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1vaHNsamltZGR1dGh3amh5Z2twIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYxMDgwMDUsImV4cCI6MjA3MTY4NDAwNX0.jacpTDGtJByh8xUvUguZCofMK08af1yFjfGtDzvL7o4"
+  STORAGE_BUCKET: "invoices"
+  AUTO_CREATE_BUCKET: "false"
