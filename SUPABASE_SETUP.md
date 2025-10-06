@@ -36,27 +36,35 @@ User enters config in Smithery UI → Query parameters → MCP Server → Parsed
    ```
    *Found in: Project Settings → API*
 
-3. **Create Storage Bucket:**
+3. **Create Storage Bucket (IMPORTANT - PRIVATE for Security):**
    ```sql
    -- Go to Storage in Supabase Dashboard
    -- Click "New Bucket"
    -- Name: "invoices"  
-   -- Make it Public: ✅
+   -- Make it Public: ❌ LEAVE UNCHECKED (keep it PRIVATE!)
    -- Or run this SQL:
    
    INSERT INTO storage.buckets (id, name, public)
-   VALUES ('invoices', 'invoices', true);
+   VALUES ('invoices', 'invoices', false);  -- false = private bucket
    ```
-
-4. **Set Storage Policies (Optional):**
-   ```sql
-   -- Allow public uploads to invoices bucket
-   CREATE POLICY "Public Upload" ON storage.objects
-   FOR INSERT WITH CHECK (bucket_id = 'invoices');
    
-   -- Allow public downloads from invoices bucket  
-   CREATE POLICY "Public Download" ON storage.objects
-   FOR SELECT USING (bucket_id = 'invoices');
+   **🔒 SECURITY NOTE:** 
+   - Invoices contain sensitive business and client data
+   - PRIVATE buckets protect against unauthorized access
+   - The server will generate time-limited signed URLs (7 days expiration)
+   - Only people with the signed URL can download the invoice
+
+4. **Set Storage Policies (Required for Private Bucket):**
+   ```sql
+   -- Allow authenticated uploads to invoices bucket
+   CREATE POLICY "Authenticated Upload" ON storage.objects
+   FOR INSERT TO authenticated
+   WITH CHECK (bucket_id = 'invoices');
+   
+   -- Allow authenticated access for signed URL generation
+   CREATE POLICY "Authenticated Access" ON storage.objects
+   FOR SELECT TO authenticated
+   USING (bucket_id = 'invoices');
    ```
 
 ### **Step 2: Deploy to Smithery**
@@ -126,13 +134,19 @@ Advanced Settings:
    💰 Total: GBP 120.00
    📅 Due Date: 2024-02-15
    
-   🔗 PDF Download: https://your-project.supabase.co/storage/v1/object/public/invoices/invoice-TEST-001-1234567890.pdf
+   🔗 PDF Download: https://your-project.supabase.co/storage/v1/object/sign/invoices/invoice-TEST-001-1234567890.pdf?token=...
    
    Storage Details:
-   • ✅ PDF stored in Supabase Storage
-   • ✅ Metadata saved to database
-   • ✅ Permanent public URL generated
-   • ✅ Accessible from anywhere
+   • ✅ PDF stored securely in PRIVATE Supabase bucket
+   • ✅ Signed URL generated (expires in 7 days)
+   • ✅ Secure access - only people with URL can download
+   • ✅ Protected from unauthorized access
+   
+   Security Features:
+   • 🔒 Private bucket - invoices NOT publicly accessible
+   • ⏱️ Time-limited URLs (expire after 7 days)
+   • 🛡️ No unauthorized access to sensitive data
+   • ✅ Share URLs safely with clients
    ```
 
 ## 🛠️ **Available MCP Tools**
@@ -141,9 +155,9 @@ Your robust server provides these tools:
 
 ### **1. generate-invoice-pdf**
 - Generates professional PDF invoices
-- Uploads to Supabase Storage
-- Saves metadata to database
-- Returns permanent public URL
+- Uploads to PRIVATE Supabase Storage bucket
+- Saves metadata to database (optional)
+- Returns secure time-limited signed URL (7 days)
 
 ### **2. get-invoice-details**
 - Retrieves invoice information from database
@@ -171,10 +185,11 @@ The server automatically:
 
 ### **Storage Auto-Setup**  
 The server automatically:
-- ✅ Creates storage bucket if needed
-- ✅ Sets public access policies
-- ✅ Configures file size limits
-- ✅ Sets MIME type restrictions
+- ✅ Creates PRIVATE storage bucket if needed (when autoCreateBucket enabled)
+- ✅ Configures secure access policies
+- ✅ Sets file size limits (50MB)
+- ✅ Restricts to PDF files only
+- ✅ Generates time-limited signed URLs for downloads
 
 ### **Error Handling**
 - ✅ Graceful degradation if database unavailable

@@ -118,11 +118,11 @@ class SupabaseManager {
         return;
       }
 
-      console.log(`📦 Creating bucket '${this.config.storageBucket}'...`);
+      console.log(`📦 Creating PRIVATE bucket '${this.config.storageBucket}' (secure)...`);
       const { error: createError } = await this.supabase.storage.createBucket(
         this.config.storageBucket,
         {
-          public: true,
+          public: false, // PRIVATE bucket for security - use signed URLs for access
           allowedMimeTypes: ['application/pdf'],
           fileSizeLimit: 50 * 1024 * 1024, // 50MB
         }
@@ -193,17 +193,22 @@ class SupabaseManager {
     if (error) {
       const guidance =
         error.message?.toLowerCase().includes('bucket not found')
-          ? ` Verify that the bucket '${this.config.storageBucket}' exists and is public.`
+          ? ` Verify that the bucket '${this.config.storageBucket}' exists (it should be PRIVATE for security).`
           : '';
       throw new Error(`PDF upload failed: ${error.message}.${guidance}`);
     }
 
-    // Get public URL
-    const { data: publicUrlData } = this.supabase.storage
+    // Generate a signed URL that expires (more secure than public URL)
+    // Default: 7 days expiration (604800 seconds)
+    const { data: signedUrlData, error: signedError } = await this.supabase.storage
       .from(this.config.storageBucket)
-      .getPublicUrl(filename);
+      .createSignedUrl(filename, 604800); // 7 days
 
-    return publicUrlData.publicUrl;
+    if (signedError) {
+      throw new Error(`Failed to generate secure download URL: ${signedError.message}`);
+    }
+
+    return signedUrlData.signedUrl;
   }
 
 }
@@ -421,15 +426,16 @@ async function handleGenerateInvoice(args: any, supabaseManager: SupabaseManager
 🔗 **PDF Download:** ${pdfUrl}
 
 **Storage Details:**
-• ✅ PDF stored in Supabase Storage bucket: "${config.storageBucket}"
-• ✅ Permanent public URL generated
-• ✅ Accessible from anywhere
-• ✅ Ready for your chat frontend
+• ✅ PDF stored securely in PRIVATE Supabase bucket: "${config.storageBucket}"
+• ✅ Signed URL generated (expires in 7 days)
+• ✅ Secure access - only people with the URL can download
+• ✅ Protected from unauthorized access
 
-**Perfect for your use case:**
-• Direct PDF storage in your "invoices" bucket
-• No database complexity - just clean URLs
-• Optimized for chat frontend integration`,
+**Security Features:**
+• 🔒 Private bucket - invoices are NOT publicly accessible
+• ⏱️ Time-limited URLs (expire after 7 days)
+• 🛡️ No unauthorized access to sensitive invoice data
+• ✅ Share URLs safely with clients`,
       },
     ],
   };

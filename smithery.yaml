@@ -27,12 +27,12 @@ startCommand:
       storageBucket:
         type: string
         title: "Storage Bucket Name"
-        description: "Supabase storage bucket name for PDF files (default: invoices)"
+        description: "Supabase storage bucket name for PDF files. Bucket should be PRIVATE (not public) for security. Uses signed URLs with 7-day expiration. (default: invoices)"
         default: "invoices"
       autoCreateBucket:
         type: boolean
         title: "Auto-create Storage Bucket"
-        description: "Requires a Supabase service role key. Disable when using an anon key (default: false)."
+        description: "Automatically creates a PRIVATE bucket if it doesn't exist. Requires a Supabase service role key. Disable when using an anon key (default: false)."
         default: false
 
       # OPTIONAL: Business Information (for invoice branding)
