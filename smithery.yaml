@@ -16,7 +16,7 @@ startCommand:
       supabaseUrl:
         type: string
         title: "Supabase Project URL"
-        description: "Your Supabase project URL (e.g., https://mohsljimdduthwjhygkp.supabase.co)"
+        description: "Your Supabase project URL (e.g., https://your-project.supabase.co)"
         pattern: "^https://.*\\.supabase\\.co$"
       supabaseKey:
         type: string

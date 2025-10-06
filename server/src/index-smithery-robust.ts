@@ -5,6 +5,9 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ListPromptsRequestSchema,
+  isInitializeRequest,
 } from "@modelcontextprotocol/sdk/types.js";
 import express from "express";
 import cors from "cors";
@@ -238,6 +241,15 @@ function createMcpServer(config: Config) {
     }
   };
 
+  // Add required protocol handlers
+  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    return { resources: [] };
+  });
+
+  server.setRequestHandler(ListPromptsRequestSchema, async () => {
+    return { prompts: [] };
+  });
+
   // Define available tools - simplified for PDF storage only
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const tools = [
@@ -425,14 +437,29 @@ async function handleGenerateInvoice(args: any, supabaseManager: SupabaseManager
 // This handles the HTTP transport for Smithery deployment
 function parseConfig(req: express.Request): Config {
   let rawConfig: any = {};
+  let configSource = 'none';
   
   // Method 1: Parse base64-encoded config parameter (Smithery standard)
   const configParam = req.query.config as string;
   if (configParam) {
     try {
       const decodedConfig = Buffer.from(configParam, 'base64').toString();
-      rawConfig = JSON.parse(decodedConfig);
-      console.log('Parsed config from base64 parameter:', rawConfig);
+      const parsedConfig = JSON.parse(decodedConfig);
+      
+      // Check if this is placeholder data (Smithery sends 'string' during initialization)
+      const hasPlaceholders = 
+        parsedConfig.supabaseUrl === 'string' || 
+        parsedConfig.supabaseKey === 'string' ||
+        !parsedConfig.supabaseUrl ||
+        !parsedConfig.supabaseKey;
+      
+      if (!hasPlaceholders) {
+        rawConfig = parsedConfig;
+        configSource = 'base64-parameter';
+        console.log('Parsed config from base64 parameter:', { ...rawConfig, supabaseKey: '***' });
+      } else {
+        console.log('Detected placeholder config in base64 parameter, falling back to environment variables');
+      }
     } catch (error) {
       console.warn('Failed to parse base64 config parameter:', error);
     }
@@ -456,38 +483,48 @@ function parseConfig(req: express.Request): Config {
       }
     }
     if (Object.keys(rawConfig).length > 0) {
-      console.log('Parsed config from dot-notation query parameters:', rawConfig);
+      configSource = 'dot-notation-params';
+      console.log('Parsed config from dot-notation query parameters:', { ...rawConfig, supabaseKey: '***' });
     }
   }
 
-  // Method 3: Environment variables (fallback for local testing)
-  if (Object.keys(rawConfig).length === 0) {
-    rawConfig.supabaseUrl =
+  // Method 3: Environment variables (fallback for local testing and Smithery scanning)
+  if (Object.keys(rawConfig).length === 0 || rawConfig.supabaseUrl === 'string' || rawConfig.supabaseKey === 'string') {
+    const envConfig: any = {};
+    envConfig.supabaseUrl =
       process.env.SUPABASE_URL || process.env.supabaseUrl || process.env.SUPABASE_PROJECT_URL;
-    rawConfig.supabaseKey =
+    envConfig.supabaseKey =
       process.env.SUPABASE_KEY ||
       process.env.supabaseKey ||
       process.env.SUPABASE_ANON_KEY ||
       process.env.SUPABASE_SERVICE_ROLE_KEY;
-    rawConfig.storageBucket = process.env.STORAGE_BUCKET || process.env.storageBucket || 'invoices';
-    rawConfig.businessName = process.env.BUSINESS_NAME || process.env.businessName;
-    rawConfig.businessEmail = process.env.BUSINESS_EMAIL || process.env.businessEmail;
-    rawConfig.businessPhone = process.env.BUSINESS_PHONE || process.env.businessPhone;
-    rawConfig.businessAddress = process.env.BUSINESS_ADDRESS || process.env.businessAddress;
+    envConfig.storageBucket = process.env.STORAGE_BUCKET || process.env.storageBucket || 'invoices';
+    envConfig.businessName = process.env.BUSINESS_NAME || process.env.businessName;
+    envConfig.businessEmail = process.env.BUSINESS_EMAIL || process.env.businessEmail;
+    envConfig.businessPhone = process.env.BUSINESS_PHONE || process.env.businessPhone;
+    envConfig.businessAddress = process.env.BUSINESS_ADDRESS || process.env.businessAddress;
+    envConfig.autoCreateBucket = process.env.AUTO_CREATE_BUCKET === 'true' || process.env.autoCreateBucket === 'true';
     
-    // Only log if we found environment variables
-    if (rawConfig.supabaseUrl || rawConfig.supabaseKey) {
+    // Only use env config if we have the required values
+    if (envConfig.supabaseUrl && envConfig.supabaseKey) {
+      rawConfig = envConfig;
+      configSource = 'environment-variables';
       console.log('Using environment variables for configuration');
     }
   }
 
-  console.log('Final raw config before validation:', rawConfig);
+  console.log(`Final config source: ${configSource}`);
+  console.log('Final raw config before validation:', { 
+    ...rawConfig, 
+    supabaseKey: rawConfig.supabaseKey ? '***' : undefined 
+  });
 
   // Validate and parse configuration
   try {
     return configSchema.parse(rawConfig);
   } catch (error) {
     console.error('Configuration validation failed:', error);
+    console.error('Config source:', configSource);
     console.error('Query parameters available:', Object.keys(req.query));
     console.error('Environment variables status:', {
       SUPABASE_URL: process.env.SUPABASE_URL ? '***set***' : 'undefined',
@@ -528,25 +565,39 @@ app.get('/health', (req, res) => {
 // Main MCP endpoint
 app.post('/mcp', async (req, res) => {
   try {
+    console.log('📥 MCP POST request received:', {
+      method: req.method,
+      hasSessionId: !!req.headers['mcp-session-id'],
+      isInitialize: isInitializeRequest(req.body),
+      queryParams: Object.keys(req.query),
+    });
+
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
     let transport: StreamableHTTPServerTransport;
     let server: Server;
 
     if (sessionId && transports[sessionId] && servers[sessionId]) {
-      // Reuse existing transport and server
+      // Reuse existing transport and server for this session
+      console.log('♻️  Reusing existing session:', sessionId);
       transport = transports[sessionId];
       server = servers[sessionId];
-    } else {
+    } else if (!sessionId && isInitializeRequest(req.body)) {
+      // New initialization request - create new session
+      console.log('🆕 New initialization request - creating session');
+      
       // Parse configuration from query parameters
       const config = parseConfig(req);
+      console.log('✅ Configuration parsed successfully');
       
       // Create new server with configuration
       server = createMcpServer(config);
+      console.log('✅ MCP server created');
       
       // Create new transport
       transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (newSessionId) => {
+          console.log('🔐 Session initialized:', newSessionId);
           transports[newSessionId] = transport;
           servers[newSessionId] = server;
         }
@@ -555,19 +606,34 @@ app.post('/mcp', async (req, res) => {
       // Clean up on close
       transport.onclose = () => {
         if (transport.sessionId) {
+          console.log('🧹 Cleaning up session:', transport.sessionId);
           delete transports[transport.sessionId];
           delete servers[transport.sessionId];
         }
       };
 
       // Connect server to transport
+      console.log('🔗 Connecting server to transport...');
       await server.connect(transport);
+      console.log('✅ Server connected successfully');
+    } else {
+      // Invalid request - no session ID and not an initialize request
+      console.error('❌ Invalid request: no session ID and not an initialize request');
+      return res.status(400).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32000,
+          message: 'Bad Request: No valid session ID provided or not an initialize request',
+        },
+        id: null,
+      });
     }
 
     // Handle the request
+    console.log('📤 Handling request with transport');
     await transport.handleRequest(req, res, req.body);
   } catch (error) {
-    console.error('Error handling MCP request:', error);
+    console.error('❌ Error handling MCP request:', error);
     if (!res.headersSent) {
       res.status(500).json({
         jsonrpc: '2.0',
@@ -606,11 +672,12 @@ app.delete('/mcp', async (req, res) => {
 });
 
 // Start server
-const PORT = process.env.PORT || 8081;
-app.listen(PORT, () => {
+const PORT = parseInt(process.env.PORT || '8080', 10);
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Invoice MCP Server with Supabase running on port ${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
-  console.log(`🔌 MCP endpoint: http://localhost:${PORT}/mcp`);
+  console.log(`📊 Health check: http://0.0.0.0:${PORT}/health`);
+  console.log(`🔌 MCP endpoint: http://0.0.0.0:${PORT}/mcp`);
   console.log(`📚 Ready for Smithery deployment!`);
+  console.log(`🌐 Binding to all interfaces (0.0.0.0) for Docker compatibility`);
 });
 
