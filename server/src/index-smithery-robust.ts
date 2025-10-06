@@ -219,6 +219,8 @@ function createMcpServer(config: Config) {
     {
       capabilities: {
         tools: {},
+        resources: {},
+        prompts: {},
       },
     }
   );
